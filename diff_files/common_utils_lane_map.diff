@@ -1,0 +1,229 @@
+diff --git a/common/utils_map/include/utils/map/lane_map_parser.h b/common/utils_map/include/utils/map/lane_map_parser.h
+index 702977a2d..631e8811f 100644
+--- a/common/utils_map/include/utils/map/lane_map_parser.h
++++ b/common/utils_map/include/utils/map/lane_map_parser.h
+@@ -116,10 +116,13 @@ void setDirectionOfTravel(lane_map::LaneGroup& lg, const lane_map::DirectionOfTr
+  *
+  * @param[in] json_root json structure
+  * @param[in] use_NED Convert points to NED.
++ * @param[in] assert_polygon Assert that the feature is a polygon (This allows to read multiple feature types from a
++ *file)
+  * @returns lane map PolygonFeature
+  **/
+-PolygonFeatureList parsePolygonFeatures(const Json::Value& json_root, bool use_NED);
++PolygonFeatureList parsePolygonFeatures(const Json::Value& json_root, bool use_NED, bool assert_polygon = true);
+ 
++PointFeatureList parsePointFeatures(const Json::Value& json_root, bool use_NED, bool assert_point = true);
+ 
+ } // namespace lane_map
+ 
+diff --git a/common/utils_map/include/utils/map/lane_map_structs.h b/common/utils_map/include/utils/map/lane_map_structs.h
+index dec8b9e22..f6091e8cb 100644
+--- a/common/utils_map/include/utils/map/lane_map_structs.h
++++ b/common/utils_map/include/utils/map/lane_map_structs.h
+@@ -364,6 +364,7 @@ struct LaneGroup
+   std::unordered_map<LaneRef, Lane> lanes;
+   std::unordered_map<BoundaryRef, Boundary> boundaries;
+   bool is_right_shoulder_undrivable = false;
++  bool is_left_shoulder_undrivable = false;
+   double length = 0;
+   int8_t functional_class = 0;
+   int8_t route_type = 0;
+@@ -400,13 +401,61 @@ struct Tile
+   std::unordered_map<ConnectorRef, Connector> connectors;
+ };
+ 
++struct TerminalParkingSpot
++{
++  std::string parking_spot_id;
++  BoostPolygon boundary_geometry;
++  geometry_msgs::Point center_point;
++  double heading;
++  LaneGroupRef inflow_ref;
++  LaneGroupRef outflow_ref;
++  uint64_t left_boundary_id;
++  uint64_t right_boundary_id;
++};
++
++struct Pole
++{
++  uint64_t id;
++  double radius;
++  geometry_msgs::Point center_point;
++
++  // this serves as a temp solution here for lat lon rather than utm.
++  // will update with @Ishaan to see how to unify the parking spot point
++  // and pole to a same coordinate system.
++  // todo: unify the coordinate system with parking spot.
++  geometry_msgs::Point point;
++};
++
++struct ParkingSpotBoundary
++{
++  uint64_t id;
++  std::vector<geometry_msgs::Point> pts;
++  std::string marking_width;
++};
++
++struct TerminalMap
++{
++  std::string terminal_id;
++  std::unordered_map<std::string, TerminalParkingSpot> terminal_parking_spots;
++  std::vector<Pole> terminal_poles;
++  std::unordered_map<uint64_t, ParkingSpotBoundary> terminal_parking_spot_boundaries;
++};
++
+ struct PolygonFeature
+ {
+   BoostPolygon polygon;
+   Json::Value properties;
+ };
+ 
++// TODO: Remove ROS-based types from this struct and replace with C++ types
++struct PointFeature
++{
++  geometry_msgs::Point point;
++  Json::Value properties;
++};
++
+ using PolygonFeatureList = std::vector<PolygonFeature>;
++using PointFeatureList = std::vector<PointFeature>;
+ 
+ } // namespace lane_map
+ 
+diff --git a/common/utils_map/include/utils/map/utils.h b/common/utils_map/include/utils/map/utils.h
+index addd0e1fc..50b7428ae 100644
+--- a/common/utils_map/include/utils/map/utils.h
++++ b/common/utils_map/include/utils/map/utils.h
+@@ -698,6 +698,10 @@ std::unordered_set<uint64_t> getSurroundingTiles(double lat, double lng, int dep
+ std::unordered_set<uint64_t> getSurroundingTiles(const std::pair<uint64_t, uint64_t>& tile_xy, int depth,
+                                                  uint8_t tile_level = DEFAULT_TILE_LEVEL);
+ 
++BoostPolygon getBoostPolygonFromPoints(const std::vector<geometry_msgs::Point>& points);
++
++std::vector<geometry_msgs::Point> getPointsFromBoostPolygon(const BoostPolygon& polygon);
++
+ } // namespace map_utils
+ 
+ namespace std {
+diff --git a/common/utils_map/src/lane_map_parser.cpp b/common/utils_map/src/lane_map_parser.cpp
+index b69dba0ad..c5fbd0f4a 100644
+--- a/common/utils_map/src/lane_map_parser.cpp
++++ b/common/utils_map/src/lane_map_parser.cpp
+@@ -299,7 +299,7 @@ void setDirectionOfTravel(lane_map::LaneGroup& lg, const lane_map::DirectionOfTr
+   lg.direction_of_travel = dot;
+ }
+ 
+-PolygonFeatureList parsePolygonFeatures(const Json::Value& json_root, bool use_NED)
++PolygonFeatureList parsePolygonFeatures(const Json::Value& json_root, bool use_NED, bool assert_polygon)
+ {
+   /*
+    * Given a json file, parse a list of polygons.  The expected format is:
+@@ -336,6 +336,11 @@ PolygonFeatureList parsePolygonFeatures(const Json::Value& json_root, bool use_N
+   for (const auto& json_feature : json_annotations_features) {
+     const Json::Value json_geometry = json_feature["geometry"];
+ 
++    if (!assert_polygon && json_geometry["type"].asString() != "Polygon") {
++      continue;
++    }
++    assert(json_geometry["type"].asString() == "Polygon");
++
+     lane_map::PolygonFeature feature;
+     feature.polygon = geojson_utils::asBoostPolygon(json_geometry, use_NED);
+     feature.properties = json_feature["properties"];
+@@ -346,4 +351,51 @@ PolygonFeatureList parsePolygonFeatures(const Json::Value& json_root, bool use_N
+   return feature_list;
+ }
+ 
++PointFeatureList parsePointFeatures(const Json::Value& json_root, bool use_NED, bool assert_point)
++{
++  /*
++   * Given a json file, parse a list of Point features.  The expected format is:
++   * {
++   *   "type": "FeatureCollection",
++   *   "features": [
++   *     {
++   *       "type": "Feature",
++   *       "properties": {
++   *         "map_file": "somewhere_awesome.json",
++   *         "name": "test",
++   *         "id": "xxx"
++   *       },
++   *       "geometry": {
++   *         "type": "Point",
++   *         "coordinates": [ lat, long ]
++   *       }
++   *     }
++   *   ]
++   * }
++   *
++   * NOTE: properties are not required but recommended for debugging and tracking purposes.
++   **/
++
++  const Json::Value& json_annotations_features = json_root["features"];
++  PointFeatureList feature_list;
++  feature_list.reserve(json_annotations_features.size());
++
++  for (const auto& json_feature : json_annotations_features) {
++    const Json::Value json_geometry = json_feature["geometry"];
++
++    if (!assert_point && json_geometry["type"].asString() != "Point") {
++      continue;
++    }
++    assert(json_geometry["type"].asString() == "Point");
++
++    lane_map::PointFeature feature;
++    feature.point = geojson_utils::asPoint64(json_geometry, use_NED);
++    feature.properties = json_feature["properties"];
++
++    feature_list.push_back(std::move(feature));
++  }
++
++  return feature_list;
++}
++
+ } // end namespace lane_map
+diff --git a/common/utils_map/src/utils.cpp b/common/utils_map/src/utils.cpp
+index 977ab7eb5..7961179cd 100644
+--- a/common/utils_map/src/utils.cpp
++++ b/common/utils_map/src/utils.cpp
+@@ -8,6 +8,7 @@
+ #include <GeographicLib/TransverseMercator.hpp>
+ #include <algorithm>
+ #include <boost/geometry/algorithms/for_each.hpp>
++#include <boost/geometry/strategies/strategies.hpp>
+ #include <cassert>
+ #include <cmath>
+ #include <iostream>
+@@ -423,4 +424,31 @@ std::unordered_set<uint64_t> getSurroundingTiles(const std::pair<uint64_t, uint6
+   return tiles;
+ }
+ 
++BoostPolygon getBoostPolygonFromPoints(const std::vector<geometry_msgs::Point>& points)
++{
++  std::vector<BoostPoint> boost_points;
++
++  // Assume the polygon is closed when getting the points
++  boost_points.reserve(points.size());
++  for (const auto& point : points) {
++    boost_points.emplace_back(point.x, point.y);
++  }
++
++  BoostPolygon polygon;
++  boost::geometry::assign_points(polygon, boost_points);
++  return polygon;
++}
++
++std::vector<geometry_msgs::Point> getPointsFromBoostPolygon(const BoostPolygon& polygon)
++{
++  std::vector<geometry_msgs::Point> points;
++  for (const auto& point : polygon.outer()) {
++    geometry_msgs::Point point_msg;
++    point_msg.x = point.get<0>();
++    point_msg.y = point.get<1>();
++    points.push_back(point_msg);
++  }
++  return points;
++}
++
+ } // namespace map_utils

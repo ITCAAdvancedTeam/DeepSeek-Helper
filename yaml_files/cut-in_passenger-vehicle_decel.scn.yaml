@@ -1,0 +1,379 @@
+# Copyright (C) 2021 Applied Intuition, Inc. All rights reserved.
+# This source code file is distributed under and subject to the LICENSE in license.txt or, to the extent you have entered into a signed Master Services and Software License Agreement (MSSA) with Applied Intuition, Inc., then the MSSA.
+metadata:
+  name: cut-in_passenger-vehicle_decel
+  scenario_version: v0.96
+  author_email: stan@applied.co
+  description: >
+    Description: Ego must react to passenger vehicle cutting into lane from right while decelerating. Cut-in vehicle speed, transition distance, headway at time of cut-in, and deceleration rate are varied. Test Objective: The purpose of this scenario is to test if the Ego can react accordingly to the cut-in vehicle by maintaiing a safe distance.
+
+  associated_plan_items:
+  - uuid: HWY-113
+    project_name: Frontier
+  tags:
+  - LCC
+  - AEB
+  - ALC
+  - ACC
+  - Adapted to ADKit
+  - Test Suites
+  - Test Suite - Highway
+  - LKA
+  - Adapted to Japan Maps
+  - cut_in
+  - highway scenarios JP maps
+  scenario_taxonomy:
+    taxonomy:
+      EGO Level:
+        Dynamic Driving Tasks:
+          Lane Following:
+          - and reacting to cut-in
+      Road Level:
+        Lane Geometry:
+          Lane Width [m]:
+            Regular:
+            - 3.5 - 4.5
+          Parking Spot Geometry [m]: {}
+          Lane Curvature [1/m]:
+            80 km/h highways:
+            - 0 - 0.05
+          Lane Grade: {}
+          'Distance of Lane Properties ': {}
+        Lane Topology:
+          Relationship between lanes:
+          - 2-3 driving lanes in one direction on the highway
+          - Physical separation of driving directions on the highway
+        Lane Properties:
+          'Lane Boundaries ':
+            Lane Marking Color:
+            - white lane marking
+            Lane Boundary Type:
+            - dashed lane marking type
+          Lane Surface Properties: {}
+          Lane Types:
+          - Regular driving lane on highway
+      Temporal Modification: {}
+      Objects:
+        Object Types:
+          Dynamic Object:
+          - Vehicle
+        Object Behavior:
+        - Cut-in
+      Traffic Infrastructure: {}
+      'Environment ': {}
+      Digital Information: {}
+include:
+- file: scenario://workspace/test_config.inc.yaml
+map:
+  key: dmp_shin_tomei_zone_53@japan1
+projection_settings:
+  utm:
+    north: true
+    zone: 11
+trip_agent:
+  behavior:
+  - fixed_route_poses:
+      poses:
+      - relative_pose: # start pose
+          to:
+            ego: true
+          lane_relative_coordinates:
+            s: 0
+            t: 0
+      - relative_pose: # end pose
+          to:
+            map_point: $map_point
+          lane_relative_coordinates:
+            lane_split_preference: RIGHT
+            s: 600
+            t: 0
+global_variables:
+- name: map_point
+  value: {utm: {x: 769907.4191259809, y: 3857963.4432741087, z: 80.62703882263946}}
+- name: ego_init_speed # desired Ego starting speed
+  value: 23
+- name: speed_delta # desired difference in speed
+  value: 5
+- name: relative_speed # difference in Ego's speed and cut in speed minus speed delta
+  value: !math "($ego_init_speed - ($cut_in_init_speed - $speed_delta))"
+agents:
+- ego:
+    initial_position:
+      relative:
+        to:
+          map_point: $map_point
+        lane_relative_coordinates:
+          s: 0
+          t: 0
+    initial_velocity_mps: $ego_init_speed
+    # behaviors:
+    # - smooth_lane_keeping:
+    #     params:
+    #       distance: 1000
+    #     constant_velocity: {}
+- obstacle:
+    behaviors:
+    - smooth_lane_keeping:
+        adaptive_cruise:
+          desired_time_gap: 1s
+          enforce_max_bounds: true
+          max_accel: 3
+          max_decel: 3
+          min_dist: 5
+        constant_velocity:
+        params:
+          distance: 1000
+    model:
+      static:
+        height: 1.5
+        point:
+        - x: 2.3
+          y: 0.9
+        - x: 2.3
+          y: -0.9
+        - x: -2.3
+          y: -0.9
+        - x: -2.3
+          y: 0.9
+    initial_state:
+      relative:
+        to:
+          ego: true
+        lane_relative_coordinates:
+          lane_split_preference: FORWARD
+          s: -70
+          t: 0
+      speed_mps: 25
+    type: VEHICLE
+    id: 100
+- obstacle:
+    behaviors:
+    - smooth_lane_keeping:
+        adaptive_cruise:
+          desired_time_gap: 1s
+          enforce_max_bounds: true
+          max_accel: 3
+          max_decel: 3
+          min_dist: 5
+        constant_velocity:
+        params:
+          distance: 1000
+    model:
+      static:
+        height: 1.5
+        point:
+        - x: 2.3
+          y: 0.9
+        - x: 2.3
+          y: -0.9
+        - x: -2.3
+          y: -0.9
+        - x: -2.3
+          y: 0.9
+    initial_state:
+      relative:
+        to:
+          ego: true
+        lane_relative_coordinates:
+          lane_split_preference: FORWARD
+          s: 100
+          t: 0
+      speed_mps: 24.5
+    type: VEHICLE
+    id: 2
+- obstacle:
+    behaviors:
+    - smooth_lane_keeping:
+        constant_velocity:
+        params:
+          distance: 1000
+      until_true: # Trigger the cut in when the headway between the ego and actor is $trigger_headway_seconds
+        or:
+          conditions:
+          - and:
+              conditions:
+              - in_region:
+                  region:
+                    polygon_local:
+                      reference_object:
+                        ego: {}
+                      local_point:
+                      - {x: !math "-1 * abs($relative_speed) * $trigger_headway_seconds + $cut_in_transition_distance", y: 6}
+                      - {x: !math "-1 * abs($relative_speed) * $trigger_headway_seconds + $cut_in_transition_distance", y: -6}
+                      - {x: $ego_half_length, y: -6}
+                      - {x: $ego_half_length, y: 6}
+                      visualization_options:
+                        visualization_mode: ENABLED_LIVE
+                  obstacle:
+                    obstacle_id: 1
+              - compare:
+                  x:
+                    sim_time: {}
+                  greater_than:
+                    static_number: 20
+              - not:
+                  in_region:
+                    region:
+                      polygon_local:
+                        reference_object:
+                          obstacle_id: 1
+                        local_point:
+                        - {x: $truck_half_length, y: 6}
+                        - {x: $truck_half_length, y: 0}
+                        - {x: !math "-1 * $cut_in_transition_distance/4", y: 0}
+                        - {x: !math "-1 * $cut_in_transition_distance/4", y: 6}
+                        visualization_options:
+                          visualization_mode: ENABLED_LIVE
+                    obstacle:
+                      all_obstacles: {}
+          - in_region:
+              region:
+                polygon_local:
+                  reference_object:
+                    obstacle_id: 1
+                  local_point:
+                  - {x: !math "-1 * $relative_speed * $trigger_headway_seconds - $car_half_length", y: 0}
+                  - {x: !math "-1 * $relative_speed * $trigger_headway_seconds - $car_half_length", y: 6}
+                  - {x: !math "-1 * $relative_speed * $trigger_headway_seconds - $car_half_length + 1", y: 6}
+                  - {x: !math "-1 * $relative_speed * $trigger_headway_seconds - $car_half_length + 1", y: 0}
+                  visualization_options:
+                    visualization_mode: ENABLED_LIVE
+              obstacle:
+                ego: {}
+    - lane_change:
+        motion_profile:
+          phases:
+          - ramp_velocity:
+              target: !math "$cut_in_init_speed - $speed_delta"
+              rate: $cut_in_decel_rate
+          - hold_velocity:
+              duration: 100
+        relative_lane:
+          change_direction: LEFT
+          change_shape: SIGMOID
+          lane_follow_distance: 1
+          num_lanes: 1
+          transition_distance: $cut_in_transition_distance
+    - smooth_lane_keeping:
+        constant_velocity:
+        params:
+          distance: 1000
+    model:
+      static:
+        height: 1.5
+        point:
+        - x: 2.3
+          y: 0.9
+        - x: 2.3
+          y: -0.9
+        - x: -2.3
+          y: -0.9
+        - x: -2.3
+          y: 0.9
+    initial_state:
+      relative:
+        to:
+          ego: true
+        lane_relative_coordinates:
+          relative_lane: -1
+          lane_split_preference: FORWARD
+          s: $cut_in_initial_distance
+          t: 0.0
+      speed_mps: $cut_in_init_speed
+    type: VEHICLE
+    id: 1
+- obstacle:
+    behaviors:
+    - smooth_lane_keeping:
+        adaptive_cruise:
+          desired_time_gap: 1s
+          enforce_max_bounds: true
+          max_accel: 3
+          max_decel: 3
+          min_dist: 5
+        constant_velocity: {}
+        params:
+          distance: 1000
+    model:
+      static:
+        height: 1.5
+        point:
+        - x: 2.3
+          y: 0.9
+        - x: 2.3
+          y: -0.9
+        - x: -2.3
+          y: -0.9
+        - x: -2.3
+          y: 0.9
+    initial_state:
+      relative:
+        to:
+          ego: true
+        lane_relative_coordinates:
+          relative_lane: -1
+          s: -10
+          t: 0
+      speed_mps: $cut_in_init_speed
+    type: VEHICLE
+    id: 4
+parameter_sweeps:
+- range:
+    first_value: 1
+    last_value: 2
+    num_steps: 3
+    var: cut_in_decel_rate
+- range:
+    first_value: 20
+    last_value: 23
+    num_steps: 5
+    var: cut_in_init_speed
+    group: one
+- range:
+    first_value: 85
+    last_value: 45
+    num_steps: 5
+    var: cut_in_initial_distance
+    group: one
+- range:
+    first_value: 80
+    last_value: 120
+    num_steps: 3
+    var: cut_in_transition_distance
+- range:
+    first_value: 5
+    last_value: 7
+    num_steps: 3
+    var: trigger_headway_seconds
+observers:
+- name: End Region
+  plan_item_uuids:
+  - REQ-3895
+  true_at_least_once:
+    or:
+      conditions:
+      - in_region:
+          obstacle: {ego: {}}
+          region:
+            point_radius:
+              point:
+                relative:
+                  to:
+                    ego: true
+                  lane_relative_coordinates:
+                    s: 600
+                    t: 0
+              radius: 2
+      - in_region:
+          obstacle: {ego: {}}
+          region:
+            point_radius:
+              point:
+                relative:
+                  to:
+                    ego: true
+                  lane_relative_coordinates:
+                    s: 600
+                    t: 0
+                    relative_lane: -1
+              radius: 2
