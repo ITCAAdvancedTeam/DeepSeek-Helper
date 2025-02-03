@@ -1,0 +1,604 @@
+diff --git a/planning/planning_common/include/planning_common/types/constraint_map.h b/planning/planning_common/include/planning_common/types/constraint_map.h
+index 51bf4dc2e..f4f452463 100644
+--- a/planning/planning_common/include/planning_common/types/constraint_map.h
++++ b/planning/planning_common/include/planning_common/types/constraint_map.h
+@@ -78,36 +78,36 @@ struct BehaviorSpeedConstraints
+ {
+   BehaviorSpeedConstraints()
+   {
+-    for (auto behavior_type : { BehaviorType::FOLLOW_ROAD, BehaviorType::TELEOP, BehaviorType::GAP_FIND,
+-                                BehaviorType::MERGE, BehaviorType::OVERTAKE, BehaviorType::YIELD_TO_LANE_CHANGE,
+-                                BehaviorType::TERMINAL_FOLLOW_LANE, BehaviorType::TERMINAL_PARK, BehaviorType::TERMINAL_UNPARK }) {
++    for (auto behavior_type :
++         { BehaviorType::FOLLOW_ROAD, BehaviorType::TELEOP, BehaviorType::GAP_FIND, BehaviorType::MERGE,
++           BehaviorType::OVERTAKE, BehaviorType::YIELD_TO_LANE_CHANGE, BehaviorType::FREE_SPACE }) {
+       constraints[behavior_type] = SpeedLimitProfile();
+     }
+   }
+ 
+   void setLimitingType(const SpeedLimiterType& limiter_type)
+   {
+-    for (auto behavior_type : { BehaviorType::FOLLOW_ROAD, BehaviorType::TELEOP, BehaviorType::GAP_FIND,
+-                                BehaviorType::MERGE, BehaviorType::OVERTAKE, BehaviorType::YIELD_TO_LANE_CHANGE,
+-                                BehaviorType::TERMINAL_FOLLOW_LANE, BehaviorType::TERMINAL_PARK, BehaviorType::TERMINAL_UNPARK }) {
++    for (auto behavior_type :
++         { BehaviorType::FOLLOW_ROAD, BehaviorType::TELEOP, BehaviorType::GAP_FIND, BehaviorType::MERGE,
++           BehaviorType::OVERTAKE, BehaviorType::YIELD_TO_LANE_CHANGE, BehaviorType::FREE_SPACE }) {
+       constraints[behavior_type].limiting_type = limiter_type;
+     }
+   }
+ 
+   void setAllBehaviorConstraints(const double speed_constraint)
+   {
+-    for (auto behavior_type : { BehaviorType::FOLLOW_ROAD, BehaviorType::TELEOP, BehaviorType::GAP_FIND,
+-                                BehaviorType::MERGE, BehaviorType::OVERTAKE, BehaviorType::YIELD_TO_LANE_CHANGE,
+-                                BehaviorType::TERMINAL_FOLLOW_LANE, BehaviorType::TERMINAL_PARK, BehaviorType::TERMINAL_UNPARK }) {
++    for (auto behavior_type :
++         { BehaviorType::FOLLOW_ROAD, BehaviorType::TELEOP, BehaviorType::GAP_FIND, BehaviorType::MERGE,
++           BehaviorType::OVERTAKE, BehaviorType::YIELD_TO_LANE_CHANGE, BehaviorType::FREE_SPACE }) {
+       constraints[behavior_type].setConstantSpeedLimit(speed_constraint);
+     }
+   }
+ 
+   void setAllBehaviorConstraints(const PiecewiseLinear& speed_limit)
+   {
+-    for (auto behavior_type : { BehaviorType::FOLLOW_ROAD, BehaviorType::TELEOP, BehaviorType::GAP_FIND,
+-                                BehaviorType::MERGE, BehaviorType::OVERTAKE, BehaviorType::YIELD_TO_LANE_CHANGE,
+-                                BehaviorType::TERMINAL_FOLLOW_LANE, BehaviorType::TERMINAL_PARK, BehaviorType::TERMINAL_UNPARK }) {
++    for (auto behavior_type :
++         { BehaviorType::FOLLOW_ROAD, BehaviorType::TELEOP, BehaviorType::GAP_FIND, BehaviorType::MERGE,
++           BehaviorType::OVERTAKE, BehaviorType::YIELD_TO_LANE_CHANGE, BehaviorType::FREE_SPACE }) {
+       constraints[behavior_type].speed_limit = speed_limit;
+     }
+   }
+diff --git a/planning/planning_common/include/planning_common/types/frenet_graph.h b/planning/planning_common/include/planning_common/types/frenet_graph.h
+index 5d4f227f1..79a1343ce 100644
+--- a/planning/planning_common/include/planning_common/types/frenet_graph.h
++++ b/planning/planning_common/include/planning_common/types/frenet_graph.h
+@@ -39,14 +39,14 @@ struct FrenetNode
+   std::vector<FrenetEdge> forward;  //< Forward connections if there is a merge
+   std::vector<FrenetEdge> backward; //< Backward connection if there is a merge
+ 
+-  LaneID lane_id; //< LaneID that the Frenet Node is associated with
+-  double length;  //< Length of the node from the beginning of the lane-ref associated with the lane-id
++  LaneID lane_id;                   //< LaneID that the Frenet Node is associated with
++  double length; //< Length of the node from the beginning of the lane-ref associated with the lane-id
+ 
+   std::vector<lane_map::LaneRef> lane_ref_sequence; //< Sequence of lane refs that define the Frenet node
+ 
+   std::size_t lane_id_ref_index = 0; //< Index to sort the nodes since multiple nodes can be related to a single lane-id
+ 
+-  NodeID id = NodeID::UNDEFINED; //< id of the node
++  NodeID id = NodeID::UNDEFINED;     //< id of the node
+ 
+   // Helper functions to emulate previous functions
+ 
+diff --git a/planning/planning_common/include/planning_common/types/operational_domain.h b/planning/planning_common/include/planning_common/types/operational_domain.h
+index 69455580c..1113a2139 100644
+--- a/planning/planning_common/include/planning_common/types/operational_domain.h
++++ b/planning/planning_common/include/planning_common/types/operational_domain.h
+@@ -7,7 +7,6 @@ namespace planning {
+ struct OperationalDomain
+ {
+   bool disable_lane_changes = false;
+-  bool disable_terminal = false;
+ };
+ 
+ 
+diff --git a/planning/planning_common/include/planning_common/types/planning_parameters.h b/planning/planning_common/include/planning_common/types/planning_parameters.h
+index 2b64b6480..1071e17cf 100644
+--- a/planning/planning_common/include/planning_common/types/planning_parameters.h
++++ b/planning/planning_common/include/planning_common/types/planning_parameters.h
+@@ -8,6 +8,7 @@
+ #include "planning_common/BehaviorConfig.h"
+ #include "planning_common/ConstraintsConfig.h"
+ #include "planning_common/CostWeightsConfig.h"
++#include "planning_common/FreeSpacePlannerConfig.h"
+ #include "planning_common/HoldBrakeConfig.h"
+ #include "planning_common/LaneChangeConfig.h"
+ #include "planning_common/LateralShiftConfig.h"
+@@ -20,6 +21,7 @@
+ #include "planning_common/ReferenceLineConfig.h"
+ #include "planning_common/SamplingConfig.h"
+ #include "planning_common/SpeedLimiterConfig.h"
++#include "planning_common/TerminalPlannerConfig.h"
+ #include "planning_common/Tgv2LaneKeepingMotionPlannerConfig.h"
+ #include "planning_common/Tgv2LaneKeepingPathPlannerConfig.h"
+ #include "planning_common/TrajectoryConfig.h"
+@@ -95,6 +97,8 @@ struct PlannerParameters
+   planner::PlannerConfig planner_general;
+   planner::AssociateConfig associate;
+   planner::OptimizerSQPConfig optimizer_params;
++  planner::FreeSpacePlannerConfig free_space_planner;
++  planner::TerminalPlannerConfig terminal_planner;
+ 
+   // Static parameters
+   // TODO: (niclas) Clean up so all parameters are handled in the same way
+@@ -113,6 +117,8 @@ struct PlannerParameters
+     , planner_general(planner::PlannerConfig::__getDefault__())
+     , associate(planner::AssociateConfig::__getDefault__())
+     , optimizer_params(planner::OptimizerSQPConfig::__getDefault__())
++    , free_space_planner(planner::FreeSpacePlannerConfig::__getDefault__())
++    , terminal_planner(planner::TerminalPlannerConfig::__getDefault__())
+     , num_predicted_trajectory_steps(static_cast<size_t>(
+           std::ceil((behavior.merge.merge_prediction_horizon + trajectory.planner_general.traj_sample_dT) /
+                     trajectory.planner_general.traj_sample_dT)))
+diff --git a/planning/planning_common/include/planning_common/types/planning_types.h b/planning/planning_common/include/planning_common/types/planning_types.h
+index 7d6a68ef4..ab74b74b3 100644
+--- a/planning/planning_common/include/planning_common/types/planning_types.h
++++ b/planning/planning_common/include/planning_common/types/planning_types.h
+@@ -438,9 +438,7 @@ enum class BehaviorType : uint8_t
+   OVERTAKE,
+   YIELD_TO_LANE_CHANGE,
+   LANE_CHANGE,
+-  TERMINAL_FOLLOW_LANE,
+-  TERMINAL_PARK,
+-  TERMINAL_UNPARK,
++  FREE_SPACE,
+   TELEOP
+ };
+ 
+@@ -448,14 +446,16 @@ enum class BehaviorType : uint8_t
+  * @brief Strings for printing above enums.
+  */
+ // !!Make sure to match these if enum is changed!!
+-static const std::map<BehaviorType, std::string> behaviorTypeStrings = {
+-  { BehaviorType::INVALID, "INVALID" },             { BehaviorType::FOLLOW_ROAD, "FOLLOW_ROAD" },
+-  { BehaviorType::GAP_FIND, "GAP_FIND" },           { BehaviorType::MERGE, "MERGE" },
+-  { BehaviorType::OVERTAKE, "OVERTAKE" },           { BehaviorType::YIELD_TO_LANE_CHANGE, "YIELD_TO_LANE_CHANGE" },
+-  { BehaviorType::LANE_CHANGE, "LANE_CHANGE" },     { BehaviorType::TERMINAL_FOLLOW_LANE, "TERMINAL_FOLLOW_LANE" },
+-  { BehaviorType::TERMINAL_PARK, "TERMINAL_PARK" }, { BehaviorType::TERMINAL_UNPARK, "TERMINAL_UNPARK" },
+-  { BehaviorType::TELEOP, "TELEOP" }
+-};
++static const std::map<BehaviorType, std::string> behaviorTypeStrings = { { BehaviorType::INVALID, "INVALID" },
++                                                                         { BehaviorType::FOLLOW_ROAD, "FOLLOW_ROAD" },
++                                                                         { BehaviorType::GAP_FIND, "GAP_FIND" },
++                                                                         { BehaviorType::MERGE, "MERGE" },
++                                                                         { BehaviorType::OVERTAKE, "OVERTAKE" },
++                                                                         { BehaviorType::YIELD_TO_LANE_CHANGE,
++                                                                           "YIELD_TO_LANE_CHANGE" },
++                                                                         { BehaviorType::LANE_CHANGE, "LANE_CHANGE" },
++                                                                         { BehaviorType::FREE_SPACE, "FREE_SPACE" },
++                                                                         { BehaviorType::TELEOP, "TELEOP" } };
+ 
+ // Enum type for different lane change reasons
+ // !!Make sure to match enum strings if enum is changed!!
+diff --git a/planning/planning_common/include/planning_common/types/predicted_object.h b/planning/planning_common/include/planning_common/types/predicted_object.h
+index bca7dd5ea..967b3c8d9 100644
+--- a/planning/planning_common/include/planning_common/types/predicted_object.h
++++ b/planning/planning_common/include/planning_common/types/predicted_object.h
+@@ -24,6 +24,8 @@ class PredictedObject
+ 
+   bool isPredictionValid() const;
+ 
++  bool isObjectStatic() const;
++
+   const std::unordered_map<Intention, Probability>& getIntentionProbabilities() const;
+ 
+   const std::unordered_set<LaneID>& getLaneIDAssociations() const;
+@@ -70,6 +72,8 @@ class PredictedObject
+ 
+   const ObjectType& getType() const;
+ 
++  std::optional<double> getSpeedLimit() const;
++
+   // HACK for backwards compatibility - perception used to pass down objects as perception_type::VOS but is now passing
+   // down the actual type (CAR,TRUCK, etc.). Since lateral planner currently uses VOS type as a cost input, let's keep
+   // this type around for now but update the lateral tuning later.
+@@ -100,6 +104,8 @@ class PredictedObject
+ 
+   ObjectType type_ = ObjectType::UNDEFINED;
+ 
++  std::optional<double> speed_limit_;
++
+   BB bb_; ///< Bounding box aligneed with the object
+ 
+   // Convex hull of object.
+diff --git a/planning/planning_common/include/planning_common/types/predicted_scene.h b/planning/planning_common/include/planning_common/types/predicted_scene.h
+index 731d2d12d..4d9c6d695 100644
+--- a/planning/planning_common/include/planning_common/types/predicted_scene.h
++++ b/planning/planning_common/include/planning_common/types/predicted_scene.h
+@@ -15,6 +15,7 @@
+ #include "planning_common/types/reference_line.h"
+ #include "predicted_object.h"
+ #include "scenery/objectory.h"
++#include "terminal_map_server/terminal_mappery/terminal_mappery.h"
+ #include "utils/basic_types/basic_types.h"
+ 
+ namespace planning {
+@@ -71,14 +72,26 @@ class PredictedScene
+    * @param cache
+    * @param manual_lane_change_override_enabled
+    * @param lane_ref_distances_till_end
++   * @param lane_ref_distances_till_merge_transition
++   * @param in_aggressive_steer_zone
++   * @param in_no_shift_zone
++   * @param in_high_curvature_zone
++   * @param in_shift_zone
++   * @param shift_direction
++   * @param shift_value
++   * @param desired_speed_above_road_limit
++   * @param parking_spot_id
++   * @param terminal_unpark_handoff_pose
++   * @param terminal_map
++   * @param left_hand_drive_enabled
+    */
+   PredictedScene(std_msgs::Header scene_msg_header, const GCSLocation& gcs_location,
+                  std::unique_ptr<const Mappery>&& lane_graph, EgoObject ego_object,
+                  std::unordered_map<ObjectID, PredictedObject> predicted_objects,
+                  std::unordered_map<LaneID, std::vector<ObjectID>> objects_in_lane,
+                  std::unordered_set<ObjectID> relevant_vos_objects, std::unordered_set<ObjectID> ignored_vos_objects,
+-                 FrenetGraph frenet_graph, ReferenceLines reference_lines, const FrameTransform& odom_t_vehicle,
+-                 const motion_history::MotionHistory& motion_history,
++                 bool out_of_odd_obj_detected, FrenetGraph frenet_graph, ReferenceLines reference_lines,
++                 const FrameTransform& odom_t_vehicle, const motion_history::MotionHistory& motion_history,
+                  planning_msgs::LaneChangeRequest lane_change_request, const DesiredSpeedLimit& desired_speed_limit,
+                  PredictedSceneCache cache, LaneIDTracker lane_id_tracker,
+                  const teleop_msgs::TeleopOutput& teleop_output, bool in_teleop_zone,
+@@ -86,7 +99,10 @@ class PredictedScene
+                  std::unordered_map<lane_map::LaneRef, double> distances_until_lane_end,
+                  std::unordered_map<lane_map::LaneRef, double> distances_until_merge_transition,
+                  bool in_aggressive_steer_zone, bool in_no_shift_zone, bool in_high_curvature_zone, bool in_shift_zone,
+-                 std::int8_t shift_direction, double shift_value, double desired_speed_above_road_limit);
++                 std::int8_t shift_direction, double shift_value, double desired_speed_above_road_limit,
++                 int terminal_planning_state, std::string parking_spot_id,
++                 std::optional<GCSLocation> terminal_unpark_handoff_pose,
++                 std::unique_ptr<TerminalMappery> terminal_map);
+ 
+   const ros::Time& getTimeStamp() const;
+ 
+@@ -108,6 +124,10 @@ class PredictedScene
+ 
+   std::unordered_map<ObjectID, PredictedObject>& getAllPredictedObjects();
+ 
++  const std::unordered_map<ObjectID, PredictedObject>& getAllStaticPredictedObjects() const;
++
++  std::unordered_map<ObjectID, PredictedObject>& getAllStaticPredictedObjects();
++
+   const Mappery& getLaneGraph() const;
+ 
+   const std::vector<ObjectID>& getFrontEgoLaneObjects() const;
+@@ -124,6 +144,8 @@ class PredictedScene
+   const std::unordered_set<ObjectID>& getRelevantVosObjects() const;
+   const std::unordered_set<ObjectID>& getIgnoredVosObjects() const;
+ 
++  const bool containsOutOfOddObjects() const;
++
+   boost::optional<lane_map::JunctionRef> getCurrentMergeJunction() const;
+ 
+   const mappery::SuperLane& getMapEgoLane() const;
+@@ -184,6 +206,42 @@ class PredictedScene
+    */
+   LaneID getMergingLaneID() const;
+ 
++  /**
++   * @brief Get the terminal planning state
++   *
++   * @return int The terminal planning state, corresponds to enum TerminalStateMachine::TerminalState
++   */
++  int getTerminalPlanningState() const;
++
++  /**
++   * @brief Get the terminal parking spot ID
++   *
++   * @return std::optional<std::string> The terminal parking spot ID
++   *         This may correspond to origin/destination parking spot id based on the received terminal ID
++   */
++  std::optional<std::string> getTerminalParkingSpotID() const;
++
++  /**
++   * @brief Get the terminal unpark handoff point pose
++   *
++   * @return std::optional<GCSLocation> The terminal unpark handoff point pose, if it exists
++   */
++  std::optional<GCSLocation> getTerminalUnparkHandoffPose() const;
++
++  /**
++   * @brief Get the terminal map
++   *
++   * @return const perception_msgs::TerminalMap& The terminal map
++   */
++  const TerminalMappery& getTerminalMap() const;
++
++  /**
++   * @brief Check if left hand drive is enabled
++   *
++   * @return true if left hand drive is enabled
++   */
++  bool isLeftHandDriveEnabled() const;
++
+  private:
+   /*************************************************************************
+    *** All objects below are available in the free space scene **/
+@@ -205,7 +263,6 @@ class PredictedScene
+ 
+   std::unordered_map<lane_map::LaneRef, double> distances_until_merge_transition_;
+ 
+-
+  private:
+   // Transformation from odom frame to vehicle frame
+   FrameTransform odom_T_vehicle_;
+@@ -233,6 +290,9 @@ class PredictedScene
+   // All predicted objects
+   std::unordered_map<ObjectID, PredictedObject> predicted_objects_;
+ 
++  // All Static Predicted Objects
++  std::unordered_map<ObjectID, PredictedObject> static_predicted_objects_;
++
+   // Cache: Precomputed information for common calls
+   PredictedSceneCache cache_;
+ 
+@@ -242,6 +302,9 @@ class PredictedScene
+   std::unordered_set<ObjectID> relevant_vos_objects_;
+   std::unordered_set<ObjectID> ignored_vos_objects_;
+ 
++  // Out of ODD Object in Scene
++  const bool out_of_odd_obj_detected_;
++
+   // Reference line system.
+   ReferenceLines reference_lines_;
+ 
+@@ -257,6 +320,14 @@ class PredictedScene
+ 
+   double shift_value_ = 0.0;
+   std::int8_t shift_direction_ = 0;
++
++  int terminal_planning_state_ = 0;
++
++  std::string parking_spot_id_;
++  std::optional<GCSLocation> terminal_unpark_handoff_pose_ = std::nullopt;
++  std::unique_ptr<TerminalMappery> terminal_map_;
++
++  bool enable_left_hand_drive_ = false;
+ };
+ 
+ // TODO: (niclas) Can this inherit the normal predicted scene or use the predicted scene structure
+diff --git a/planning/planning_common/include/planning_common/types/reference_line.h b/planning/planning_common/include/planning_common/types/reference_line.h
+index dd1023933..e9a8cae25 100644
+--- a/planning/planning_common/include/planning_common/types/reference_line.h
++++ b/planning/planning_common/include/planning_common/types/reference_line.h
+@@ -444,16 +444,6 @@ class ReferenceLines
+     return lane_id_to_reference_line_.find(id) != lane_id_to_reference_line_.end();
+   }
+ 
+-  /**
+-   * Add new reference lint to given Lane ID.
+-   * @param id Lane ID to be added
+-   * @param line New reference line to be added
+-   */
+-  inline void addReferenceLine(const LaneID id, const ReferenceLine& line)
+-  {
+-    lane_id_to_reference_line_[id] = line;
+-  }
+-
+   /**
+    * Check if the collection is empty.
+    * @return true if empty.
+diff --git a/planning/planning_common/include/planning_common/types/scene_info_tg.h b/planning/planning_common/include/planning_common/types/scene_info_tg.h
+index 5f48c9f17..4155e2505 100644
+--- a/planning/planning_common/include/planning_common/types/scene_info_tg.h
++++ b/planning/planning_common/include/planning_common/types/scene_info_tg.h
+@@ -21,10 +21,12 @@ struct SceneInfoTG
+     bool in_high_curvature_zone;
+     bool is_teleop_active;
+     bool in_rightmost_lane;
++    bool in_leftmost_lane;
+     bool is_full_teleop;
+     double teleop_shift_distance;
+     bool in_teleop_zone;
+     bool right_shoulder_drivable;
++    bool left_shoulder_drivable;
+   };
+ 
+   // Adjacent lane info. Only used by lateral planner.
+diff --git a/planning/planning_common/src/types/predicted_object.cpp b/planning/planning_common/src/types/predicted_object.cpp
+index 2b10baf83..bddd4858c 100644
+--- a/planning/planning_common/src/types/predicted_object.cpp
++++ b/planning/planning_common/src/types/predicted_object.cpp
+@@ -9,6 +9,10 @@
+ #include "planning_common/math/planning_math.h"
+ #include "utils/math/wrap_angle.h"
+ 
++namespace {
++constexpr double kStaticObstacleMaxSpeed = 0.1;
++} // namespace
++
+ namespace planning {
+ 
+ PredictedObject::PredictedObject() : bb_(Eigen::Vector2d(0.0, 0.0), 0.0, 0.0, 0.0)
+@@ -19,6 +23,9 @@ PredictedObject::PredictedObject(const perception_msgs::Object& object_msg, cons
+                                  const double yaw_rate, const BB& bb)
+   : id_(static_cast<ObjectID>(object_msg.id)), type_(static_cast<ObjectType>(object_msg.type)), bb_(bb)
+ {
++  if (type_ == ObjectType::SPEED_LIMIT_SIGN) {
++    speed_limit_ = object_msg.speed_limit_sign_limit_mps;
++  }
+   // Extract position covariance elements from pose covariance
+ 
+   pos_cov_ << object_msg.pose.covariance.at(0), object_msg.pose.covariance.at(1), object_msg.pose.covariance.at(6),
+@@ -27,11 +34,11 @@ PredictedObject::PredictedObject(const perception_msgs::Object& object_msg, cons
+   // Set position and heading of object.
+   cartesian_state_.x = object_msg.pose.pose.position.x;
+   cartesian_state_.y = object_msg.pose.pose.position.y;
+-  #ifdef BAZEL
++#ifdef BAZEL
+   cartesian_state_.heading = tf2::getYaw(object_msg.pose.pose.orientation);
+-  #else
++#else
+   cartesian_state_.heading = tf::getYaw(object_msg.pose.pose.orientation);
+-  #endif
++#endif
+ 
+   // Acceleration and velocity can not be set here directly since it need to be transformed to the
+   // inertial frame of ego.
+@@ -61,6 +68,11 @@ bool PredictedObject::isPredictionValid() const
+   return prediction_valid_;
+ }
+ 
++bool PredictedObject::isObjectStatic() const
++{
++  return std::hypot(vx_inertial_, vy_inertial_) <= kStaticObstacleMaxSpeed;
++}
++
+ const std::unordered_map<Intention, Probability>& PredictedObject::getIntentionProbabilities() const
+ {
+   return intention_probabilities_;
+@@ -177,6 +189,11 @@ const ObjectType& PredictedObject::getType() const
+   return type_;
+ }
+ 
++std::optional<double> PredictedObject::getSpeedLimit() const
++{
++  return speed_limit_;
++}
++
+ void PredictedObject::setType(const ObjectType& obj_type_must_be_vos)
+ {
+   assert(obj_type_must_be_vos == ObjectType::VOS);
+diff --git a/planning/planning_common/src/types/predicted_scene.cpp b/planning/planning_common/src/types/predicted_scene.cpp
+index 4c1ab3202..635de1407 100644
+--- a/planning/planning_common/src/types/predicted_scene.cpp
++++ b/planning/planning_common/src/types/predicted_scene.cpp
+@@ -5,6 +5,22 @@
+ #include <utility>
+ 
+ #include "planning_common/utils/frenet_utils.h"
++#include "utils/ros/params.h"
++
++
++namespace {
++std::unordered_map<ObjectID, planning::PredictedObject>
++createStaticPredictedObjects(const std::unordered_map<ObjectID, planning::PredictedObject>& predicted_objects)
++{
++  std::unordered_map<ObjectID, planning::PredictedObject> static_objects;
++  for (const auto& [id, predicted_object] : predicted_objects) {
++    if (predicted_object.isObjectStatic()) {
++      static_objects[id] = predicted_object;
++    }
++  }
++  return static_objects;
++}
++} // namespace
+ 
+ namespace planning {
+ 
+@@ -13,15 +29,17 @@ PredictedScene::PredictedScene(
+     EgoObject ego_object, std::unordered_map<ObjectID, PredictedObject> predicted_objects,
+     std::unordered_map<LaneID, std::vector<ObjectID>> objects_in_lane,
+     std::unordered_set<ObjectID> relevant_vos_objects, std::unordered_set<ObjectID> ignored_vos_objects,
+-    FrenetGraph frenet_graph, ReferenceLines reference_lines, const FrameTransform& odom_t_vehicle,
+-    const motion_history::MotionHistory& motion_history, planning_msgs::LaneChangeRequest lane_change_request,
+-    const PredictedScene::DesiredSpeedLimit& desired_speed_limit, PredictedSceneCache cache,
+-    LaneIDTracker lane_id_tracker, const teleop_msgs::TeleopOutput& teleop_output, const bool in_teleop_zone,
+-    const bool manual_lane_change_override_enabled,
++    bool out_of_odd_obj_detected, FrenetGraph frenet_graph, ReferenceLines reference_lines,
++    const FrameTransform& odom_t_vehicle, const motion_history::MotionHistory& motion_history,
++    planning_msgs::LaneChangeRequest lane_change_request, const PredictedScene::DesiredSpeedLimit& desired_speed_limit,
++    PredictedSceneCache cache, LaneIDTracker lane_id_tracker, const teleop_msgs::TeleopOutput& teleop_output,
++    const bool in_teleop_zone, const bool manual_lane_change_override_enabled,
+     std::unordered_map<lane_map::LaneRef, double> distances_until_lane_end,
+     std::unordered_map<lane_map::LaneRef, double> distances_until_merge_transition, const bool in_aggressive_steer_zone,
+     const bool is_no_shift_zone, const bool in_high_curvature_zone, const bool is_shift_zone,
+-    std::int8_t shift_direction, double shift_value, double desired_speed_above_road_limit)
++    std::int8_t shift_direction, double shift_value, double desired_speed_above_road_limit,
++    const int terminal_planning_state, std::string parking_spot_id,
++    std::optional<GCSLocation> terminal_unpark_handoff_pose, std::unique_ptr<TerminalMappery> terminal_map)
+   : scene_msg_header_(std::move(scene_msg_header))
+   , gcs_location_(gcs_location)
+   , lane_graph_(std::move(lane_graph))
+@@ -35,10 +53,12 @@ PredictedScene::PredictedScene(
+   , desired_speed_limit_(desired_speed_limit)
+   , ego_object_(std::move(ego_object))
+   , predicted_objects_(std::move(predicted_objects))
++  , static_predicted_objects_(createStaticPredictedObjects(predicted_objects_))
+   , cache_(std::move(cache))
+   , objects_in_lane_(std::move(objects_in_lane))
+   , relevant_vos_objects_(std::move(relevant_vos_objects))
+   , ignored_vos_objects_(std::move(ignored_vos_objects))
++  , out_of_odd_obj_detected_(out_of_odd_obj_detected)
+   , reference_lines_(std::move(reference_lines))
+   , manual_lane_change_override_enabled_(manual_lane_change_override_enabled)
+   , teleop_output_(teleop_output)
+@@ -50,7 +70,13 @@ PredictedScene::PredictedScene(
+   , shift_value_(shift_value)
+   , shift_direction_(shift_direction)
+   , desired_speed_above_road_limit_(desired_speed_above_road_limit)
++  , terminal_planning_state_(terminal_planning_state)
++  , parking_spot_id_(parking_spot_id)
++  , terminal_unpark_handoff_pose_(std::move(terminal_unpark_handoff_pose))
++  , terminal_map_(std::move(terminal_map))
++  , enable_left_hand_drive_(false)
+ {
++  ros::param::get("enable_left_hand_drive", enable_left_hand_drive_);
+ }
+ 
+ const ros::Time& PredictedScene::getTimeStamp() const
+@@ -108,6 +134,16 @@ std::unordered_map<ObjectID, PredictedObject>& PredictedScene::getAllPredictedOb
+   return predicted_objects_;
+ }
+ 
++const std::unordered_map<ObjectID, PredictedObject>& PredictedScene::getAllStaticPredictedObjects() const
++{
++  return static_predicted_objects_;
++}
++
++std::unordered_map<ObjectID, PredictedObject>& PredictedScene::getAllStaticPredictedObjects()
++{
++  return static_predicted_objects_;
++}
++
+ const Mappery& PredictedScene::getLaneGraph() const
+ {
+   return *lane_graph_;
+@@ -151,6 +187,11 @@ const std::unordered_set<ObjectID>& PredictedScene::getIgnoredVosObjects() const
+   return ignored_vos_objects_;
+ }
+ 
++const bool PredictedScene::containsOutOfOddObjects() const
++{
++  return out_of_odd_obj_detected_;
++}
++
+ boost::optional<lane_map::JunctionRef> PredictedScene::getCurrentMergeJunction() const
+ {
+   return cache_.merge_junction_id;
+@@ -158,7 +199,6 @@ boost::optional<lane_map::JunctionRef> PredictedScene::getCurrentMergeJunction()
+ 
+ const mappery::SuperLane& PredictedScene::getMapEgoLane() const
+ {
+-  assert(lane_graph_->getEgoLane());
+   return lane_graph_->getEgoLane()->ego_lane;
+ }
+ 
+@@ -322,6 +362,31 @@ const std::unordered_map<lane_map::LaneRef, double>& PredictedScene::getDistance
+   return distances_until_merge_transition_;
+ }
+ 
++int PredictedScene::getTerminalPlanningState() const
++{
++  return terminal_planning_state_;
++}
++
++std::optional<std::string> PredictedScene::getTerminalParkingSpotID() const
++{
++  return parking_spot_id_.empty() ? std::nullopt : std::optional<std::string>(parking_spot_id_);
++}
++
++std::optional<GCSLocation> PredictedScene::getTerminalUnparkHandoffPose() const
++{
++  return terminal_unpark_handoff_pose_;
++}
++
++const TerminalMappery& PredictedScene::getTerminalMap() const
++{
++  return *terminal_map_;
++}
++
++bool PredictedScene::isLeftHandDriveEnabled() const
++{
++  return enable_left_hand_drive_;
++}
++
+ 
+ PredictedMergeScene::PredictedMergeScene(const PredictedScene& scene, const Trajectory& ego_trajectory,
+                                          const double critical_point_s, const double interaction_point_s)

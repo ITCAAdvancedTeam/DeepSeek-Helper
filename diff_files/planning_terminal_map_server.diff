@@ -1,0 +1,745 @@
+diff --git a/planning/terminal_map_server/BUILD b/planning/terminal_map_server/BUILD
+new file mode 100755
+index 000000000..f7b02b169
+--- /dev/null
++++ b/planning/terminal_map_server/BUILD
+@@ -0,0 +1,17 @@
++cc_library(
++    name = "terminal_map_server",
++    srcs = glob(["src/**/*.cpp"]),
++    hdrs = glob(["include/**/*.h"]),
++    includes = [
++        "include",
++        "include/terminal_map_server/mappery",
++    ],
++    visibility = ["//visibility:public"],
++    deps = [
++        "//common/utils_association",
++        "//common/utils_map",
++        "//mapping/maps:map_utils",
++        "//perception/scenery",
++        "@ros_common_msgs//:cc_geometry_msgs",
++    ],
++)
+diff --git a/planning/terminal_map_server/CMakeLists.txt b/planning/terminal_map_server/CMakeLists.txt
+new file mode 100755
+index 000000000..0f9269250
+--- /dev/null
++++ b/planning/terminal_map_server/CMakeLists.txt
+@@ -0,0 +1,61 @@
++cmake_minimum_required(VERSION 3.5)
++project(terminal_map_server)
++
++set(CATKIN_COMPONENTS
++    applanix_msgs
++    diagnostics_utils
++    maps
++    perception_msgs
++    roscpp
++    scenery
++    utils_association
++    utils_map
++)
++
++find_package(catkin REQUIRED COMPONENTS ${CATKIN_COMPONENTS})
++find_package(Boost REQUIRED)
++find_package(Eigen3 REQUIRED)
++
++catkin_package(
++    INCLUDE_DIRS include
++    LIBRARIES terminal_map_server
++    CATKIN_DEPENDS ${CATKIN_COMPONENTS}
++    DEPENDS Boost EIGEN3
++)
++
++### Terminal Mappery Library ###
++
++add_library(terminal_map_server
++    src/terminal_mappery/terminal_mappery.cpp
++)
++
++target_include_directories(terminal_map_server
++PUBLIC
++    include
++SYSTEM
++    ${catkin_INCLUDE_DIRS}
++    ${Boost_INCLUDE_DIRS}
++    ${EIGEN3_INCLUDE_DIRS}
++)
++
++include_directories(SYSTEM ${EIGEN3_INCLUDE_DIRS})
++
++target_link_libraries(terminal_map_server ${catkin_LIBRARIES})
++
++add_dependencies(terminal_map_server ${catkin_EXPORTED_TARGETS})
++
++install(DIRECTORY include/
++    DESTINATION ${CATKIN_PACKAGE_INCLUDE_DESTINATION}
++    FILES_MATCHING PATTERN "*.h"
++    PATTERN ".svn" EXCLUDE
++)
++
++install(TARGETS terminal_map_server
++    ARCHIVE DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
++    LIBRARY DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
++    RUNTIME DESTINATION ${CATKIN_GLOBAL_BIN_DESTINATION}
++)
++
++if(CATKIN_ENABLE_TESTING)
++    add_subdirectory(test)
++endif()
+diff --git a/planning/terminal_map_server/README.md b/planning/terminal_map_server/README.md
+new file mode 100644
+index 000000000..fd65867d9
+--- /dev/null
++++ b/planning/terminal_map_server/README.md
+@@ -0,0 +1,8 @@
++# Terminal Map Server
++
++## Terminal Mappery
++The `TerminalMappery` class constructs a mappery of terminal objects in Ego frame from a `perception_msgs::TerminalMap` input message.
++
++Terminal objects are stored in KDTree data structures for fast querying. Currently tracked objects are static objects and parking spots.
++
++We can obtain object boundaries in Ego frame from the `TerminalMappery` to help construct a costmap for free space planning.
+diff --git a/planning/terminal_map_server/include/terminal_map_server/terminal_mappery/terminal_mappery.h b/planning/terminal_map_server/include/terminal_map_server/terminal_mappery/terminal_mappery.h
+new file mode 100644
+index 000000000..ac00b8fc7
+--- /dev/null
++++ b/planning/terminal_map_server/include/terminal_map_server/terminal_mappery/terminal_mappery.h
+@@ -0,0 +1,122 @@
++#pragma once
++
++#include <Eigen/Dense>
++#include <unordered_map>
++#include <unordered_set>
++#include <vector>
++
++#include "maps/map_frame.h"
++#include "maps/utils/map_frame_utils.h"
++#include "perception_msgs/HullInfo.h"
++#include "perception_msgs/Map.h"
++#include "perception_msgs/TerminalMap.h"
++#include "perception_msgs/TerminalParkingSpot.h"
++#include "scenery/objectory.h"
++#include "utils/association/point_to_point_pairing.h"
++#include "utils/map/lane_map_structs.h"
++#include "utils/map/utils.h"
++
++
++class TerminalMappery
++{
++ public:
++  /**
++   * @brief Construct a new TerminalMappery object
++   *
++   * @param terminal_map The terminal map
++   */
++  TerminalMappery(const perception_msgs::TerminalMap& terminal_map);
++
++  /**
++   * @brief Construct a new (empty) TerminalMappery object
++   */
++  TerminalMappery();
++
++  /**
++   * @brief Load static objects in terminal
++   *
++   * @param predicted_objects The predicted objects (ObjectID, centerpoint, hull info)
++   */
++  void loadStaticObjectsInTerminal(
++      const std::unordered_map<ObjectID, std::pair<Eigen::Vector2d, perception_msgs::HullInfo>>& predicted_objects);
++
++  /**
++   * @brief Get all static boundaries of Objects in terminal within a certain distance
++   *
++   * @param distance_m The distance in meters
++   */
++  std::vector<std::vector<Eigen::Vector2d>> getStaticObstaclesBoundariesWithinDistance(double distance_m) const;
++
++  /**
++   * @brief Get the terminal parking boundaries for a given terminal in Vehicle Frame within a certain distance
++   *
++   * @param distance_m The distance in meters
++   * @return std::vector<std::vector<Eigen::Vector2d>> The terminal parking boundaries in Vehicle Frame (no heading)
++   */
++  std::vector<std::vector<Eigen::Vector2d>> getTerminalParkingBoundariesWithinDistance(double distance_m) const;
++
++  /**
++   * @brief Get terminal parking spot for the given parking spot ID
++   *
++   * @param parking_spot_id The parking spot ID
++   * @return std::optional<lane_map::TerminalParkingSpot> The terminal parking spot, if it exists
++   */
++  std::optional<lane_map::TerminalParkingSpot> getTerminalParkingSpot(const std::string& parking_spot_id) const;
++
++  /**
++   * @brief Get the terminal map
++   *
++   * @return const perception_msgs::TerminalMap& The terminal map
++   */
++  const lane_map::TerminalMap& getTerminalMap() const;
++
++ private:
++  struct StaticObstacleBoundary
++  {
++    Eigen::Vector2d centerpoint;
++    std::vector<Eigen::Vector2d> boundary;
++  };
++
++  // Terminal Map
++  lane_map::TerminalMap terminal_map_;
++
++  // Map Frame
++  maps::MapFrame map_frame_;
++
++  // Static Object Boundaries / Parking Spots in Terminal
++  std::vector<std::vector<Eigen::Vector2d>> static_obstacles_boundaries_;
++  std::vector<lane_map::TerminalParkingSpot> terminal_parking_spots_;
++
++  // KDTree for static obstacles and parking spots
++  std::unique_ptr<utils_association::PointToPointPairer> static_obstacles_kdtree_;
++  std::unique_ptr<utils_association::PointToPointPairer> parking_spots_kdtree_;
++
++  /**
++   * @brief Load parking spots in terminal
++   */
++  void loadParkingSpotsInTerminal();
++
++  /**
++   * @brief Convert a polygon from UTM to Vehicle Frame
++   *
++   * @param polygon The polygon in UTM
++   * @return std::vector<Eigen::Vector2d> The polygon in Vehicle Frame (no heading)
++   */
++  std::vector<Eigen::Vector2d> convertPolygonUtmToVehicleFrame(const std::vector<Eigen::Vector2d>& polygon) const;
++
++  /**
++   * @brief Convert a point from UTM to Vehicle Frame
++   *
++   * @param utm_point The point in UTM
++   * @return Eigen::Vector2d The point in Vehicle Frame (no heading)
++   */
++  Eigen::Vector2d convertPointUtmToVehicleFrame(const Eigen::Vector2d& utm_point) const;
++
++  /**
++   * @brief Convert a point from Vehicle Frame to UTM
++   *
++   * @param vehicle_point The point in Vehicle Frame
++   * @return Eigen::Vector2d The point in UTM
++   */
++  Eigen::Vector2d convertPointVehicleFrameToUtm(const Eigen::Vector2d& vehicle_point) const;
++};
+diff --git a/planning/terminal_map_server/package.xml b/planning/terminal_map_server/package.xml
+new file mode 100644
+index 000000000..599bec02f
+--- /dev/null
++++ b/planning/terminal_map_server/package.xml
+@@ -0,0 +1,18 @@
++<?xml version="1.0"?>
++<package format="2">
++    <name>terminal_map_server</name>
++    <version>0.0.1</version>
++    <description>The terminal_map_server package</description>
++    <maintainer email="ishaan@applied.co">gilbran</maintainer>
++    <license>Embark</license>
++    <buildtool_depend>catkin</buildtool_depend>
++    <depend>applanix_msgs</depend>
++    <depend>boost</depend>
++    <depend>diagnostics_utils</depend>
++    <depend>maps</depend>
++    <depend>perception_msgs</depend>
++    <depend>roscpp</depend>
++    <depend>scenery</depend>
++    <depend>utils_association</depend>
++    <depend>utils_map</depend>
++</package>
+diff --git a/planning/terminal_map_server/src/terminal_mappery/terminal_mappery.cpp b/planning/terminal_map_server/src/terminal_mappery/terminal_mappery.cpp
+new file mode 100644
+index 000000000..d8aad9a79
+--- /dev/null
++++ b/planning/terminal_map_server/src/terminal_mappery/terminal_mappery.cpp
+@@ -0,0 +1,196 @@
++#include "terminal_map_server/terminal_mappery/terminal_mappery.h"
++
++#include "maps/utils/terminal_map_utils.h"
++
++namespace {
++inline double getDistanceApproximationUTM(const double x0, const double y0, const double x1, const double y1)
++{
++  return std::sqrt(std::pow(x1 - x0, 2) + std::pow(y1 - y0, 2));
++}
++
++std::vector<Eigen::Vector2d> getPointsFromGeometryMsg(const std::vector<geometry_msgs::Point>& points)
++{
++  std::vector<Eigen::Vector2d> points_vector;
++  for (const auto& point : points) {
++    points_vector.emplace_back(point.x, point.y);
++  }
++  return points_vector;
++}
++
++std::vector<std::vector<Eigen::Vector2d>> getLongestEdgesFromParkingSpot(const std::vector<Eigen::Vector2d>& polygon)
++{
++  // Each Parking Spot Polygon has 5 points, with the first and last point being the same
++  // Each consecutive pair of points forms an edge
++  /*
++  (x1, y2)                 (x2, y2)
++    +---------------------------+
++    |                           |
++    |                           |
++    |                           |
++    |                           |
++    +---------------------------+
++  (x1, y1)                 (x2, y1)
++  */
++  assert(polygon.size() == 5);
++
++  std::vector<std::vector<Eigen::Vector2d>> longest_edges;
++  const double distance_first_idx =
++      getDistanceApproximationUTM(polygon[0][0], polygon[0][1], polygon[1][0], polygon[1][1]);
++  const double distance_second_idx =
++      getDistanceApproximationUTM(polygon[1][0], polygon[1][1], polygon[2][0], polygon[2][1]);
++
++  if (distance_first_idx > distance_second_idx) {
++    longest_edges.push_back({ polygon[0], polygon[1] });
++    longest_edges.push_back({ polygon[2], polygon[3] });
++  } else {
++    longest_edges.push_back({ polygon[1], polygon[2] });
++    longest_edges.push_back({ polygon[3], polygon[4] });
++  }
++  return longest_edges;
++}
++} // namespace
++
++TerminalMappery::TerminalMappery(const perception_msgs::TerminalMap& terminal_map)
++  : terminal_map_(maps::terminal_map_utils::buildTerminalMap(terminal_map))
++  , map_frame_(maps::mapFrameFromMapFrameMsg(terminal_map.map_frame))
++  , static_obstacles_kdtree_(nullptr)
++  , parking_spots_kdtree_(nullptr)
++{
++  loadParkingSpotsInTerminal();
++}
++
++void TerminalMappery::loadParkingSpotsInTerminal()
++{
++  // Construct KDTree for Parking Spots
++  if (terminal_map_.terminal_parking_spots.empty()) {
++    return;
++  }
++  utils_association::PointToPointPairer::RowMajorMat points(terminal_map_.terminal_parking_spots.size(), 2);
++  size_t i = 0;
++  for (const auto& [_, terminal_parking_spot] : terminal_map_.terminal_parking_spots) {
++    terminal_parking_spots_.push_back(terminal_parking_spot);
++    points.row(i) << terminal_parking_spot.center_point.x, terminal_parking_spot.center_point.y;
++    i++;
++  }
++  parking_spots_kdtree_ = std::make_unique<utils_association::PointToPointPairer>(points);
++}
++
++void TerminalMappery::loadStaticObjectsInTerminal(
++    const std::unordered_map<ObjectID, std::pair<Eigen::Vector2d, perception_msgs::HullInfo>>& predicted_objects)
++{
++  // Clear the existing static obstacles
++  static_obstacles_boundaries_.clear();
++
++  if (predicted_objects.empty()) {
++    return;
++  }
++
++  // Construct KDTree for static obstacles
++  utils_association::PointToPointPairer::RowMajorMat points(predicted_objects.size(), 2);
++
++  size_t i = 0;
++  for (const auto& [_, predicted_object] : predicted_objects) {
++    std::vector<Eigen::Vector2d> static_obstacle_boundary;
++    for (const auto& point : predicted_object.second.hull_points) {
++      static_obstacle_boundary.emplace_back(point.x, point.y);
++    }
++    static_obstacles_boundaries_.push_back(static_obstacle_boundary);
++
++    const Eigen::Vector2d centerpoint_utm = convertPointVehicleFrameToUtm(predicted_object.first);
++    points.row(i++) << centerpoint_utm[0], centerpoint_utm[1];
++  }
++  static_obstacles_kdtree_ = std::make_unique<utils_association::PointToPointPairer>(points);
++}
++
++std::vector<std::vector<Eigen::Vector2d>>
++TerminalMappery::getStaticObstaclesBoundariesWithinDistance(double distance_m) const
++{
++  if (!static_obstacles_kdtree_) {
++    std::cerr << "Static Obstacles KDTree not initialized. Call loadStaticObjectsInTerminal() first." << std::endl;
++    return {};
++  }
++
++  std::vector<size_t> indices = static_obstacles_kdtree_->pairingsForPoint(
++      Eigen::Vector2d(map_frame_.utm_origin.position.x, map_frame_.utm_origin.position.y), distance_m);
++
++  std::vector<std::vector<Eigen::Vector2d>> result;
++  for (const auto& index : indices) {
++    result.push_back(static_obstacles_boundaries_[index]);
++  }
++
++  return result;
++}
++
++std::vector<std::vector<Eigen::Vector2d>>
++TerminalMappery::getTerminalParkingBoundariesWithinDistance(double distance_m) const
++{
++  if (!parking_spots_kdtree_) {
++    std::cerr << "Parking Spot KDTree Not Initialized. Empty Parking Spot" << std::endl;
++    return {};
++  }
++  // Distance Needs to be compared in UTM (We convert to Vehicle Frame as part of the next step)
++  std::vector<size_t> indices = parking_spots_kdtree_->pairingsForPoint(
++      Eigen::Vector2d(map_frame_.utm_origin.position.x, map_frame_.utm_origin.position.y), distance_m);
++
++  std::vector<std::vector<Eigen::Vector2d>> result;
++  for (const auto& index : indices) {
++    std::vector<Eigen::Vector2d> boundary_geometry_utm = std::move(getPointsFromGeometryMsg(
++        map_utils::getPointsFromBoostPolygon(terminal_parking_spots_[index].boundary_geometry)));
++    std::vector<std::vector<Eigen::Vector2d>> parking_edges_utm = getLongestEdgesFromParkingSpot(boundary_geometry_utm);
++    std::transform(parking_edges_utm.begin(), parking_edges_utm.end(), parking_edges_utm.begin(),
++                   [this](std::vector<Eigen::Vector2d>& edge) { return convertPolygonUtmToVehicleFrame(edge); });
++    result.insert(result.end(), std::make_move_iterator(parking_edges_utm.begin()),
++                  std::make_move_iterator(parking_edges_utm.end()));
++  }
++
++  return result;
++}
++
++std::vector<Eigen::Vector2d>
++TerminalMappery::convertPolygonUtmToVehicleFrame(const std::vector<Eigen::Vector2d>& polygon) const
++{
++  std::vector<Eigen::Vector2d> polygon_vehicle_frame;
++  for (const auto& point : polygon) {
++    polygon_vehicle_frame.push_back(convertPointUtmToVehicleFrame(point));
++  }
++  return polygon_vehicle_frame;
++}
++
++Eigen::Vector2d TerminalMappery::convertPointUtmToVehicleFrame(const Eigen::Vector2d& utm_point) const
++{
++  double point_veh_x, point_veh_y;
++  const double utm_theta = map_utils::getUtmTheta(map_frame_.utm_zone, map_frame_.origin_heading,
++                                                  map_frame_.origin_latitude, map_frame_.origin_longitude);
++  map_utils::convertUtmToVehicleFrame(utm_point[0], utm_point[1], map_frame_.utm_origin.position.x,
++                                      map_frame_.utm_origin.position.y, utm_theta, &point_veh_x, &point_veh_y);
++  return Eigen::Vector2d(point_veh_x, point_veh_y);
++}
++
++Eigen::Vector2d TerminalMappery::convertPointVehicleFrameToUtm(const Eigen::Vector2d& vehicle_point) const
++{
++  double point_utm_x, point_utm_y;
++  const double utm_theta = map_utils::getUtmTheta(map_frame_.utm_zone, map_frame_.origin_heading,
++                                                  map_frame_.origin_latitude, map_frame_.origin_longitude);
++  map_utils::convertVehicleFrameToUtm(vehicle_point[0], vehicle_point[1], map_frame_.utm_origin.position.x,
++                                      map_frame_.utm_origin.position.y, utm_theta, &point_utm_x, &point_utm_y);
++  return Eigen::Vector2d(point_utm_x, point_utm_y);
++}
++
++std::optional<lane_map::TerminalParkingSpot>
++TerminalMappery::getTerminalParkingSpot(const std::string& parking_spot_id) const
++{
++  auto it = terminal_map_.terminal_parking_spots.find(parking_spot_id);
++  if (it == terminal_map_.terminal_parking_spots.end()) {
++    return std::nullopt;
++  }
++  return it->second;
++}
++
++const lane_map::TerminalMap& TerminalMappery::getTerminalMap() const
++{
++  return terminal_map_;
++}
++
++TerminalMappery::TerminalMappery()
++{
++}
+diff --git a/planning/terminal_map_server/test/BUILD b/planning/terminal_map_server/test/BUILD
+new file mode 100644
+index 000000000..8e5e2951e
+--- /dev/null
++++ b/planning/terminal_map_server/test/BUILD
+@@ -0,0 +1,20 @@
++load("@rules_ros//ros:cc_defs.bzl", "cc_ros_binary")
++load("@rules_ros//ros:test.bzl", "ros_test")
++
++cc_ros_binary(
++    name = "terminal_mappery_test",
++    srcs = ["terminal_mappery_test.cpp"],
++    deps = [
++        "//planning/terminal_map_server",
++        "@com_google_googletest//:gtest",
++    ],
++)
++
++ros_test(
++    name = "terminal_mappery_test_ros",
++    env = {
++        "BAZEL": "true",
++    },
++    launch_file = "terminal_mappery_test.test",
++    nodes = [":terminal_mappery_test"],
++)
+diff --git a/planning/terminal_map_server/test/CMakeLists.txt b/planning/terminal_map_server/test/CMakeLists.txt
+new file mode 100644
+index 000000000..12aa15255
+--- /dev/null
++++ b/planning/terminal_map_server/test/CMakeLists.txt
+@@ -0,0 +1,5 @@
++# Unit tests
++find_package(rostest REQUIRED)
++
++add_rostest_gtest(terminal_mappery_test terminal_mappery_test.test terminal_mappery_test.cpp)
++target_link_libraries(terminal_mappery_test ${catkin_LIBRARIES} ${PROJECT_NAME})
+diff --git a/planning/terminal_map_server/test/terminal_mappery_test.cpp b/planning/terminal_map_server/test/terminal_mappery_test.cpp
+new file mode 100644
+index 000000000..eb349f784
+--- /dev/null
++++ b/planning/terminal_map_server/test/terminal_mappery_test.cpp
+@@ -0,0 +1,228 @@
++#include "terminal_map_server/terminal_mappery/terminal_mappery.h"
++
++#include <cmath>
++#include <iostream>
++
++#include "gtest/gtest.h"
++#include "perception_msgs/HullInfo.h"
++#include "perception_msgs/TerminalMap.h"
++#include "perception_msgs/TerminalParkingSpot.h"
++
++namespace {
++using StaticObjectBoundaries = std::unordered_map<ObjectID, std::pair<Eigen::Vector2d, perception_msgs::HullInfo>>;
++
++inline double getDistanceApproximationUTM(const double x0, const double y0, const double x1, const double y1)
++{
++  return std::sqrt(std::pow(x1 - x0, 2) + std::pow(y1 - y0, 2));
++}
++
++perception_msgs::TerminalMap constructTerminalMap()
++{
++  // Construct TerminalMap Object
++  perception_msgs::TerminalMap terminal_map;
++  terminal_map.terminal_id = "terminal_1";
++
++  // Create Terminal Map Frame (Taken from an example perception_msgs::TerminalMap within a JP terminal)
++  terminal_map.map_frame.header.frame_id = "/utm";
++  terminal_map.map_frame.origin_latitude = 34.84236901822735;
++  terminal_map.map_frame.origin_longitude = 137.75238235374093;
++  terminal_map.map_frame.origin_heading = 109.27321495204036;
++  terminal_map.map_frame.origin_utm.position.x = 751674.0244575818;
++  terminal_map.map_frame.origin_utm.position.y = 3859017.808240181;
++  terminal_map.map_frame.origin_utm.position.z = 0.0;
++  terminal_map.map_frame.origin_utm.orientation.x = 0.0;
++  terminal_map.map_frame.origin_utm.orientation.y = 0.0;
++  terminal_map.map_frame.origin_utm.orientation.z = -0.15384736763516532;
++  terminal_map.map_frame.origin_utm.orientation.w = 0.9880946247560151;
++  terminal_map.map_frame.utm_zone = 53;
++
++  perception_msgs::TerminalParkingSpot terminal_parking_spot_1;
++  terminal_parking_spot_1.parking_spot_id = "488870653_10";
++  geometry_msgs::Point point_1;
++  point_1.x = 751630.2114777677;
++  point_1.y = 3859002.17010626;
++  point_1.z = 0.0;
++  geometry_msgs::Point point_2;
++  point_2.x = 751634.0864508633;
++  point_2.y = 3859001.0552808377;
++  point_2.z = 0.0;
++  geometry_msgs::Point point_3;
++  point_3.x = 751624.4612638257;
++  point_3.y = 3858991.5761555745;
++  point_3.z = 0.0;
++  geometry_msgs::Point point_4;
++  point_4.x = 751620.5862883691;
++  point_4.y = 3858992.690985209;
++  point_4.z = 0.0;
++  terminal_parking_spot_1.boundary_geometry.push_back(point_1);
++  terminal_parking_spot_1.boundary_geometry.push_back(point_2);
++  terminal_parking_spot_1.boundary_geometry.push_back(point_3);
++  terminal_parking_spot_1.boundary_geometry.push_back(point_4);
++  terminal_parking_spot_1.boundary_geometry.push_back(point_1);
++  geometry_msgs::Point center_point;
++  center_point.x = 751627.336372588;
++  center_point.y = 3858996.8731303522;
++  center_point.z = 0.0;
++  terminal_parking_spot_1.center_point = center_point;
++  terminal_parking_spot_1.heading = 0.7782270312309265;
++  terminal_parking_spot_1.inflow_ref.id = 2420490706201;
++  terminal_parking_spot_1.inflow_ref.tile_id = 392699731;
++  terminal_parking_spot_1.outflow_ref.id = 187244688374832;
++  terminal_parking_spot_1.outflow_ref.tile_id = 392699731;
++
++  terminal_map.terminal_parking_spots.push_back(terminal_parking_spot_1);
++
++  return terminal_map;
++}
++
++StaticObjectBoundaries constructPredictedObject()
++{
++  StaticObjectBoundaries predicted_objects;
++
++  // Construct StaticObjectBoundaries Object
++  Eigen::Vector2d center_point(10.0, 10.0);
++
++  perception_msgs::HullInfo convex_hull;
++
++  geometry_msgs::Point32 point_1;
++  point_1.x = 751630.2114777677;
++  point_1.y = 3859002.17010626;
++  point_1.z = 0.0;
++  geometry_msgs::Point32 point_2;
++  point_2.x = 751634.0864508633;
++  point_2.y = 3859001.0552808377;
++  point_2.z = 0.0;
++  geometry_msgs::Point32 point_3;
++  point_3.x = 751624.4612638257;
++  point_3.y = 3858991.5761555745;
++  point_3.z = 0.0;
++  geometry_msgs::Point32 point_4;
++  point_4.x = 751620.5862883691;
++  point_4.y = 3858992.690985209;
++  point_4.z = 0.0;
++  convex_hull.height = 1.0;
++  convex_hull.hull_points.push_back(point_1);
++  convex_hull.hull_points.push_back(point_2);
++  convex_hull.hull_points.push_back(point_3);
++  convex_hull.hull_points.push_back(point_4);
++  convex_hull.hull_points.push_back(point_1);
++
++  ObjectID object_id = ObjectID(1);
++  predicted_objects[object_id] = std::make_pair(center_point, convex_hull);
++
++  return predicted_objects;
++}
++
++
++TEST(TerminalMapperyTest, getTerminalParkingBoundariesWithinDistance)
++{
++  perception_msgs::TerminalMap terminal_map = constructTerminalMap();
++  TerminalMappery terminal_mappery(terminal_map);
++
++  // Test getTerminalParkingBoundariesWithinDistance
++  std::vector<std::vector<Eigen::Vector2d>> terminal_parking_boundaries =
++      terminal_mappery.getTerminalParkingBoundariesWithinDistance(500.0);
++
++  // Check if the terminal parking boundaries are correct
++  const double length_1 =
++      std::sqrt(std::pow(terminal_parking_boundaries[0][0][0] - terminal_parking_boundaries[0][1][0], 2) +
++                std::pow(terminal_parking_boundaries[0][0][1] - terminal_parking_boundaries[0][1][1], 2));
++  const double length_2 =
++      std::sqrt(std::pow(terminal_parking_boundaries[1][0][0] - terminal_parking_boundaries[1][1][0], 2) +
++                std::pow(terminal_parking_boundaries[1][0][1] - terminal_parking_boundaries[1][1][1], 2));
++  ASSERT_FLOAT_EQ(length_1, 13.509184);
++  ASSERT_FLOAT_EQ(length_1, length_2);
++
++  // We are getting two edges which are the longest sides of the parking spot
++  ASSERT_EQ(terminal_parking_boundaries.size(), 2);
++}
++
++TEST(TerminalMapperyTest, getTerminalParkingBoundariesWithinDistanceEmpty)
++{
++  perception_msgs::TerminalMap terminal_map = constructTerminalMap();
++  TerminalMappery terminal_mappery(terminal_map);
++
++  // Test getTerminalParkingBoundariesWithinDistance
++  std::vector<std::vector<Eigen::Vector2d>> static_obstacles_boundaries =
++      terminal_mappery.getTerminalParkingBoundariesWithinDistance(0.0);
++
++  // Check that the static obstacles boundaries are empty
++  ASSERT_EQ(static_obstacles_boundaries.size(), 0);
++}
++
++TEST(TerminalMapperyTest, getStaticObstaclesBoundariesWithinDistance)
++{
++  perception_msgs::TerminalMap terminal_map = constructTerminalMap();
++  TerminalMappery terminal_mappery(terminal_map);
++
++  // Load Static Objects in Terminal
++  StaticObjectBoundaries predicted_objects = constructPredictedObject();
++
++  terminal_mappery.loadStaticObjectsInTerminal(predicted_objects);
++
++  // Test getStaticObstaclesBoundariesWithinDistance
++  std::vector<std::vector<Eigen::Vector2d>> static_obstacles_boundaries =
++      terminal_mappery.getStaticObstaclesBoundariesWithinDistance(500.0);
++
++  // Check if the static obstacles boundaries are correct
++  ASSERT_EQ(static_obstacles_boundaries.size(), 1);
++}
++
++TEST(TerminalMapperyTest, getStaticObstaclesBoundariesWithinDistanceEmpty)
++{
++  perception_msgs::TerminalMap terminal_map = constructTerminalMap();
++  TerminalMappery terminal_mappery(terminal_map);
++
++  // Load Static Objects in Terminal
++  StaticObjectBoundaries predicted_objects = constructPredictedObject();
++
++  terminal_mappery.loadStaticObjectsInTerminal(predicted_objects);
++
++  // Test getStaticObstaclesBoundariesWithinDistance
++  std::vector<std::vector<Eigen::Vector2d>> static_obstacles_boundaries =
++      terminal_mappery.getStaticObstaclesBoundariesWithinDistance(0.0);
++
++  // Check if the static obstacles boundaries are correct
++  ASSERT_EQ(static_obstacles_boundaries.size(), 0);
++}
++
++TEST(TerminalMapperyTest, getExistingTerminalParkingSpot)
++{
++  perception_msgs::TerminalMap terminal_map = constructTerminalMap();
++  TerminalMappery terminal_mappery(terminal_map);
++
++  // Test getTerminalParkingSpot
++  std::optional<lane_map::TerminalParkingSpot> terminal_parking_spot =
++      terminal_mappery.getTerminalParkingSpot("488870653_10");
++
++  // Check if the terminal parking spot is correct
++  ASSERT_TRUE(terminal_parking_spot.has_value());
++  ASSERT_EQ(terminal_parking_spot.value().parking_spot_id, "488870653_10");
++}
++
++TEST(TerminalMapperyTest, getNonExistingTerminalParkingSpot)
++{
++  perception_msgs::TerminalMap terminal_map = constructTerminalMap();
++  TerminalMappery terminal_mappery(terminal_map);
++
++  // Test getTerminalParkingSpot
++  std::optional<lane_map::TerminalParkingSpot> terminal_parking_spot =
++      terminal_mappery.getTerminalParkingSpot("123456");
++
++  // Check if the terminal parking spot is correct
++  ASSERT_FALSE(terminal_parking_spot.has_value());
++}
++
++
++} // namespace
++
++
++int main(int argc, char** argv)
++{
++  testing::InitGoogleTest(&argc, argv);
++
++  ros::init(argc, argv, "terminal_mappery_test", ros::init_options::AnonymousName);
++  ros::start();
++
++  return RUN_ALL_TESTS();
++}
+diff --git a/planning/terminal_map_server/test/terminal_mappery_test.test b/planning/terminal_map_server/test/terminal_mappery_test.test
+new file mode 100644
+index 000000000..f7da24ba3
+--- /dev/null
++++ b/planning/terminal_map_server/test/terminal_mappery_test.test
+@@ -0,0 +1,10 @@
++<launch>
++  <!-- For Bazel -->
++  <group if="$(eval optenv('BAZEL', 'false') == 'true')">
++    <test test-name="terminal_mappery_test" pkg="terminal_map_server" type="planning/terminal_map_server/test/terminal_mappery_test"/>
++  </group>
++  <!-- For CMake -->
++  <group unless="$(eval optenv('BAZEL', 'false') == 'true')">
++    <test test-name="terminal_mappery_test" pkg="terminal_map_server" type="terminal_mappery_test"/>
++  </group>
++</launch>

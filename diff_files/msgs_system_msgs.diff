@@ -1,0 +1,57 @@
+diff --git a/msgs/system_msgs/msg/Backtrace.msg b/msgs/system_msgs/msg/Backtrace.msg
+index 51f046478..3726ca902 100644
+--- a/msgs/system_msgs/msg/Backtrace.msg
++++ b/msgs/system_msgs/msg/Backtrace.msg
+@@ -1,5 +1,7 @@
+ # unix time the process crashed
+ uint64 time
++# The UUID associated with backtrace
++int64 uuid
+ # PID of crashing process
+ uint32 pid
+ # name of binary
+diff --git a/msgs/system_msgs/msg/DisengagementEvent.msg b/msgs/system_msgs/msg/DisengagementEvent.msg
+new file mode 100644
+index 000000000..9d85d3165
+--- /dev/null
++++ b/msgs/system_msgs/msg/DisengagementEvent.msg
+@@ -0,0 +1,16 @@
++# standard ROS header
++Header header
++
++# Intervention Type
++string intervention_type
++# May be the same as system_state_uuid if brain-prompted hard/soft fault
++int64 intervention_uuid
++# Successful Match Boolean
++bool successful_match
++# Intervention flags
++string intervention_flags
++
++# [OPTIONAL] Intervention bruflags
++string intervention_bruflags
++# [OPTIONAL] Fault Request Error message
++string intervention_message
+diff --git a/msgs/system_msgs/msg/FaultRequestUUID.msg b/msgs/system_msgs/msg/FaultRequestUUID.msg
+new file mode 100644
+index 000000000..ec70e2b4c
+--- /dev/null
++++ b/msgs/system_msgs/msg/FaultRequestUUID.msg
+@@ -0,0 +1,5 @@
++Header header
++
++int64 system_state_uuid
++string fault_type
++string message
+diff --git a/msgs/system_msgs/msg/SystemStateSoftware.msg b/msgs/system_msgs/msg/SystemStateSoftware.msg
+index 806ceb99b..b57593f35 100644
+--- a/msgs/system_msgs/msg/SystemStateSoftware.msg
++++ b/msgs/system_msgs/msg/SystemStateSoftware.msg
+@@ -2,6 +2,7 @@ Header header
+ 
+ bool is_ok
+ byte level
++int64 system_state_uuid
+ string message
+ system_msgs/NodeHealth[] error_nodes
+ system_msgs/NodeHealth[] stale_nodes

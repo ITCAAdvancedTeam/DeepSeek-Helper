@@ -1,0 +1,760 @@
+diff --git a/planning/situation_awareness/include/situation_awareness/static_costs/lane_cost_builders/lane_preference_cost_builder_helpers/lane_preferences_cost_builder_helpers.h b/planning/situation_awareness/include/situation_awareness/static_costs/lane_cost_builders/lane_preference_cost_builder_helpers/lane_preferences_cost_builder_helpers.h
+index a144e4bbc..eb61de597 100644
+--- a/planning/situation_awareness/include/situation_awareness/static_costs/lane_cost_builders/lane_preference_cost_builder_helpers/lane_preferences_cost_builder_helpers.h
++++ b/planning/situation_awareness/include/situation_awareness/static_costs/lane_cost_builders/lane_preference_cost_builder_helpers/lane_preferences_cost_builder_helpers.h
+@@ -14,14 +14,14 @@ namespace planning {
+ /// marked as "preferred lanes" or "lanes to avoid".
+ /// To avoid causing unnecessary lane changes when driving in a merging lane, we compute the set of "rightmost merging
+ /// lanes" using distances_until_merge_transition and do not increase the cost for any of them.
+-void fillCostsRightToLeft(double init_cost, const Mappery& mappery,
+-                          const std::vector<lane_map::LaneRef>& current_lanes_in_order,
+-                          const lane_map::LanePreferenceInfo& group_preferences,
+-                          const std::unordered_map<lane_map::LaneRef, double>& distances_until_merge_transition,
+-                          std::unordered_map<lane_map::LaneRef, double>* cost_per_lane_ref);
++void fillCostsOuterToInner(double init_cost, const Mappery& mappery,
++                           const std::vector<lane_map::LaneRef>& current_lanes_in_order,
++                           const lane_map::LanePreferenceInfo& group_preferences,
++                           const std::unordered_map<lane_map::LaneRef, double>& distances_until_merge_transition,
++                           std::unordered_map<lane_map::LaneRef, double>* cost_per_lane_ref);
+ 
+-void fillCostsLeftToRight(const Mappery& mappery, const std::vector<lane_map::LaneRef>& current_lanes_in_order,
+-                          const lane_map::LanePreferenceInfo& group_preferences,
+-                          std::unordered_map<lane_map::LaneRef, double>* cost_per_lane_ref);
++void fillCostsInnerToOuter(const Mappery& mappery, const std::vector<lane_map::LaneRef>& current_lanes_in_order,
++                           const lane_map::LanePreferenceInfo& group_preferences,
++                           std::unordered_map<lane_map::LaneRef, double>* cost_per_lane_ref);
+ 
+ } // namespace planning
+diff --git a/planning/situation_awareness/include/situation_awareness/static_costs/lane_cost_builders/merging/merging_utils.h b/planning/situation_awareness/include/situation_awareness/static_costs/lane_cost_builders/merging/merging_utils.h
+index cfceb1346..c3fe324dc 100644
+--- a/planning/situation_awareness/include/situation_awareness/static_costs/lane_cost_builders/merging/merging_utils.h
++++ b/planning/situation_awareness/include/situation_awareness/static_costs/lane_cost_builders/merging/merging_utils.h
+@@ -27,7 +27,7 @@ std::pair<bool, std::size_t> hasUpcomingMergeTransition(
+ /// merging together with just the "distances_until_merge_transition" - consider what we information we can compute
+ /// upstream that would make this easier to use.
+ std::vector<std::unordered_set<lane_map::LaneRef>>
+-rightMergingLaneRefs(const std::vector<lane_map::LaneRef>& current_lanes_in_order,
+-                     const std::unordered_map<lane_map::LaneRef, double>& distances_until_merge_transition);
++findMergingLaneRefs(const std::vector<lane_map::LaneRef>& current_lanes_in_order,
++                    const std::unordered_map<lane_map::LaneRef, double>& distances_until_merge_transition);
+ 
+ } // namespace planning
+diff --git a/planning/situation_awareness/include/situation_awareness/static_costs/lane_cost_builders/vehicle_on_shoulder_cost_builder.h b/planning/situation_awareness/include/situation_awareness/static_costs/lane_cost_builders/vehicle_on_shoulder_cost_builder.h
+index c18499bbe..c3e2775dc 100644
+--- a/planning/situation_awareness/include/situation_awareness/static_costs/lane_cost_builders/vehicle_on_shoulder_cost_builder.h
++++ b/planning/situation_awareness/include/situation_awareness/static_costs/lane_cost_builders/vehicle_on_shoulder_cost_builder.h
+@@ -19,7 +19,7 @@ class VehicleOnShoulderCostBuilder : public BaseCostBuilder
+    * @param backward_cost_distance_from_vos
+    * @param forward_cost_distance_from_vos
+    */
+-  static PiecewiseLinear rightMostLaneCost(const LaneID& right_most_lane_id, const ReferenceLine& ref_line,
++  static PiecewiseLinear outerMostLaneCost(const LaneID& right_most_lane_id, const ReferenceLine& ref_line,
+                                            const std::vector<std::pair<OBB, double>>& vos_objects,
+                                            double ego_object_width, double backward_cost_distance_from_vos,
+                                            double forward_cost_distance_from_vos);
+diff --git a/planning/situation_awareness/package.xml b/planning/situation_awareness/package.xml
+index 7f8ce2185..e3761d6ae 100644
+--- a/planning/situation_awareness/package.xml
++++ b/planning/situation_awareness/package.xml
+@@ -1,74 +1,62 @@
+ <?xml version="1.0"?>
+ <package format="2">
+-  <name>situation_awareness</name>
+-  <version>0.0.0</version>
+-  <description>situation awareness</description>
+-
+-  <!-- One maintainer tag required, multiple allowed, one person per tag -->
+-  <!-- Example:  -->
+-  <!-- <maintainer email="jane.doe@example.com">Jane Doe</maintainer> -->
+-  <maintainer email="somudro@embarktrucks.com">Somudro Gupta</maintainer>
+-
+-
+-  <!-- One license tag required, multiple allowed, one license per tag -->
+-  <!-- Commonly used license strings: -->
+-  <!--   BSD, MIT, Boost Software License, GPLv2, GPLv3, LGPLv2.1, LGPLv3 -->
+-  <license>TODO</license>
+-
+-
+-  <!-- Url tags are optional, but mutiple are allowed, one per tag -->
+-  <!-- Optional attribute type can be: website, bugtracker, or repository -->
+-  <!-- Example: -->
+-  <!-- <url type="website">http://wiki.ros.org/my_pkg</url> -->
+-
+-
+-  <!-- Author tags are optional, mutiple are allowed, one per tag -->
+-  <!-- Authors do not have to be maintianers, but could be -->
+-  <!-- Example: -->
+-  <!-- <author email="jane.doe@example.com">Jane Doe</author> -->
+-
+-
+-  <!-- The *_depend tags are used to specify dependencies -->
+-  <!-- Dependencies can be catkin packages or system dependencies -->
+-  <!-- Examples: -->
+-  <!-- Use build_depend for packages you need at compile time: -->
+-  <!--   <build_depend>message_generation</build_depend> -->
+-  <!-- Use buildtool_depend for build tool packages: -->
+-  <!--   <buildtool_depend>catkin</buildtool_depend> -->
+-  <!-- Use run_depend for packages you need at runtime: -->
+-  <!--   <run_depend>message_runtime</run_depend> -->
+-  <!-- Use test_depend for packages you need only for testing: -->
+-  <!--   <test_depend>gtest</test_depend> -->
+-  <buildtool_depend>catkin</buildtool_depend>
+-
+-  <depend>dynamic_reconfigure</depend>
+-  <depend>geometry_msgs</depend>
+-  <depend>lane_map_server</depend>
+-  <depend>lane_id_tracker</depend>
+-  <depend>message_generation</depend>
+-  <depend>message_runtime</depend>
+-  <depend>perception_msgs</depend>
+-  <depend>planning_common</depend>
+-  <depend>planning_msgs</depend>
+-  <depend>prediction_engine</depend>
+-  <depend>roscan_msgs</depend>
+-  <depend>roscpp</depend>
+-  <depend>roslib</depend>
+-  <depend>rospy</depend>
+-  <depend>rviz_visualization</depend>
+-  <depend>std_msgs</depend>
+-  <depend>truck_adapter</depend>
+-  <depend>truck_interface</depend>
+-  <depend>drivers_msgs</depend>
+-  <depend>maps</depend>
+-  <depend>predicted_scene_builder</depend>
+-  <depend>planner_debug</depend>
+-  <depend>utils_constants</depend>
+-  <depend>utils_serialization</depend>
+-  <depend>utils_stateful</depend>
+-  <depend>utils_thread</depend>
+-  <depend>metric_msgs</depend>
+-  <test_depend>rosunit</test_depend>
+-
+-
++    <name>situation_awareness</name>
++    <version>0.0.0</version>
++    <description>situation awareness</description>
++    <!-- One maintainer tag required, multiple allowed, one person per tag -->
++    <!-- Example:  -->
++    <!-- <maintainer email="jane.doe@example.com">Jane Doe</maintainer> -->
++    <maintainer email="somudro@embarktrucks.com">Somudro Gupta</maintainer>
++    <!-- One license tag required, multiple allowed, one license per tag -->
++    <!-- Commonly used license strings: -->
++    <!--   BSD, MIT, Boost Software License, GPLv2, GPLv3, LGPLv2.1, LGPLv3 -->
++    <license>TODO</license>
++    <!-- Url tags are optional, but mutiple are allowed, one per tag -->
++    <!-- Optional attribute type can be: website, bugtracker, or repository -->
++    <!-- Example: -->
++    <!-- <url type="website">http://wiki.ros.org/my_pkg</url> -->
++    <!-- Author tags are optional, mutiple are allowed, one per tag -->
++    <!-- Authors do not have to be maintianers, but could be -->
++    <!-- Example: -->
++    <!-- <author email="jane.doe@example.com">Jane Doe</author> -->
++    <!-- The *_depend tags are used to specify dependencies -->
++    <!-- Dependencies can be catkin packages or system dependencies -->
++    <!-- Examples: -->
++    <!-- Use build_depend for packages you need at compile time: -->
++    <!--   <build_depend>message_generation</build_depend> -->
++    <!-- Use buildtool_depend for build tool packages: -->
++    <!--   <buildtool_depend>catkin</buildtool_depend> -->
++    <!-- Use run_depend for packages you need at runtime: -->
++    <!--   <run_depend>message_runtime</run_depend> -->
++    <!-- Use test_depend for packages you need only for testing: -->
++    <!--   <test_depend>gtest</test_depend> -->
++    <buildtool_depend>catkin</buildtool_depend>
++    <depend>dynamic_reconfigure</depend>
++    <depend>geometry_msgs</depend>
++    <depend>lane_map_server</depend>
++    <depend>lane_id_tracker</depend>
++    <depend>message_generation</depend>
++    <depend>message_runtime</depend>
++    <depend>perception_msgs</depend>
++    <depend>planning_common</depend>
++    <depend>planning_msgs</depend>
++    <depend>prediction_engine</depend>
++    <depend>roscan_msgs</depend>
++    <depend>roscpp</depend>
++    <depend>roslib</depend>
++    <depend>rospy</depend>
++    <depend>rviz_visualization</depend>
++    <depend>std_msgs</depend>
++    <depend>truck_adapter</depend>
++    <depend>truck_interface</depend>
++    <depend>drivers_msgs</depend>
++    <depend>maps</depend>
++    <depend>predicted_scene_builder</depend>
++    <depend>planner_debug</depend>
++    <depend>utils_constants</depend>
++    <depend>utils_serialization</depend>
++    <depend>utils_stateful</depend>
++    <depend>utils_thread</depend>
++    <depend>metric_msgs</depend>
++    <test_depend>rosunit</test_depend>
+ </package>
+diff --git a/planning/situation_awareness/src/speed_limiter/situation_speed_limiter.cpp b/planning/situation_awareness/src/speed_limiter/situation_speed_limiter.cpp
+index 152c73181..c1501a315 100644
+--- a/planning/situation_awareness/src/speed_limiter/situation_speed_limiter.cpp
++++ b/planning/situation_awareness/src/speed_limiter/situation_speed_limiter.cpp
+@@ -35,7 +35,11 @@ void SituationSpeedLimiter::updateCurrentSpeedLimit(const PredictedScene& scene)
+       suggested_speed_from_limiters;
+ 
+   for (const auto& [type, limiter] : speed_limiters_) {
+-    suggested_speed_from_limiters[type] = limiter->getLimits(scene);
++    if (!scene.getLaneGraph().getEgoLaneRef()) {
++      suggested_speed_from_limiters[type] = {};
++    } else {
++      suggested_speed_from_limiters[type] = limiter->getLimits(scene);
++    }
+   }
+ 
+   // Case 1: Handle user override speed limiter as special case, since it should not be combined with other speed
+diff --git a/planning/situation_awareness/src/speed_limiter/speed_limiters/route_map_limiter.cpp b/planning/situation_awareness/src/speed_limiter/speed_limiters/route_map_limiter.cpp
+index 311767cf9..c5927cd76 100644
+--- a/planning/situation_awareness/src/speed_limiter/speed_limiters/route_map_limiter.cpp
++++ b/planning/situation_awareness/src/speed_limiter/speed_limiters/route_map_limiter.cpp
+@@ -18,7 +18,7 @@ std::unordered_map<LaneID, BehaviorSpeedConstraints> RouteMapLimiter::getLimits(
+   const lane_map::LaneRef* ego_lane_ref = scene.getLaneGraph().getEgoLaneRef();
+   assert(ego_lane_ref != nullptr);
+   std::vector<lane_map::LaneRef> lane_refs_left_to_right =
+-      lane_map_utils::getLaneRefsInOrder(ego_lane_ref->getLaneGroupRef(), scene.getLaneGraph().getMap());
++      lane_map_utils::getLaneRefsLeftToRight(ego_lane_ref->getLaneGroupRef(), scene.getLaneGraph().getMap());
+   // Get the list of lane IDs adjacent to us
+   std::vector<LaneID> lane_ids_in_order;
+   std::transform(lane_refs_left_to_right.begin(), lane_refs_left_to_right.end(), std::back_inserter(lane_ids_in_order),
+@@ -52,9 +52,9 @@ std::unordered_map<LaneID, BehaviorSpeedConstraints> RouteMapLimiter::getLimits(
+       // speed limit is stored in lane group, but no reason we couldn't store it at lane ref level if we wanted.
+       const lane_map::LaneGroup* lg = scene.getLaneGraph().getMap().getLaneGroup(lr.getLaneGroupRef());
+       assert(lg);
+-      const double speed_limit = lg->desired_speed_mph > 0.0
+-          ? lg->desired_speed_mph * ::constants::MPH_TO_M_S + scene.getDesiredSpeedAboveRoadLimit()
+-          : scene.getDesiredSpeedLimit().value;
++      const double speed_limit = lg->desired_speed_mph > 0.0 ? lg->desired_speed_mph * ::constants::MPH_TO_M_S +
++                                                                   scene.getDesiredSpeedAboveRoadLimit() :
++                                                               scene.getDesiredSpeedLimit().value;
+       const lane_map::Lane* lane = scene.getLaneGraph().getMap().getLane(lr);
+       assert(lane);
+       const double lane_start_s = planning_math::projectOnPolyline(lane->pts.front(), ref_line.getPoints()).arclength_s;
+diff --git a/planning/situation_awareness/src/speed_limiter/speed_limiters/vehicle_on_shoulder_limiter.cpp b/planning/situation_awareness/src/speed_limiter/speed_limiters/vehicle_on_shoulder_limiter.cpp
+index 346daa7fe..05b7e48c6 100644
+--- a/planning/situation_awareness/src/speed_limiter/speed_limiters/vehicle_on_shoulder_limiter.cpp
++++ b/planning/situation_awareness/src/speed_limiter/speed_limiters/vehicle_on_shoulder_limiter.cpp
+@@ -6,6 +6,16 @@
+ 
+ namespace planning {
+ 
++namespace {
++const std::vector<ObjectID>& getObjectsInOuterLane(const PredictedScene& scene)
++{
++  if (!scene.isLeftHandDriveEnabled()) {
++    return scene.getObjectsInLane(LaneID::RIGHT_SHOULDER);
++  } else {
++    return scene.getObjectsInLane(LaneID::LEFT_SHOULDER);
++  }
++}
++} // namespace
+ 
+ VehicleOnShoulderLimiter::VehicleOnShoulderLimiter()
+ {
+@@ -22,10 +32,10 @@ std::unordered_map<LaneID, BehaviorSpeedConstraints> VehicleOnShoulderLimiter::g
+   }
+ 
+   // reduce speed if we have a vehicle on shoulder
+-  const auto& right_vos = scenery.getObjectsInLane(LaneID::RIGHT_SHOULDER);
++  const auto& outer_lane_vos = getObjectsInOuterLane(scenery);
+   const std::unordered_map<ObjectID, PredictedObject>& predicted_objects = scenery.getAllPredictedObjects();
+ 
+-  if (right_vos.empty()) {
++  if (outer_lane_vos.empty()) {
+     // Default constructor set all speed constraints to inf
+     return speed_constraints;
+   }
+@@ -37,8 +47,8 @@ std::unordered_map<LaneID, BehaviorSpeedConstraints> VehicleOnShoulderLimiter::g
+       const ReferenceLine& ref_line = scenery.getReferenceLines().getLineFromID(lane_id);
+       // Store vos bounding boxes and longitudinal positions in vos_obb_and_positions
+       std::vector<std::pair<OBB, double>> vos_obb_and_positions;
+-      vos_obb_and_positions.reserve(right_vos.size());
+-      for (const auto& id : right_vos) {
++      vos_obb_and_positions.reserve(outer_lane_vos.size());
++      for (const auto& id : outer_lane_vos) {
+         vos_obb_and_positions.push_back({ distance_check::obbCartesian(predicted_objects.at(id)),
+                                           predicted_objects.at(id).getFrenetState(lane_id).s.x });
+       }
+diff --git a/planning/situation_awareness/src/static_costs/lane_cost_builder.cpp b/planning/situation_awareness/src/static_costs/lane_cost_builder.cpp
+index c14a0a2ba..16070a425 100644
+--- a/planning/situation_awareness/src/static_costs/lane_cost_builder.cpp
++++ b/planning/situation_awareness/src/static_costs/lane_cost_builder.cpp
+@@ -12,9 +12,11 @@ LaneCostBuilder::LaneCostBuilder(const lane_map::PolygonFeatureList* lane_prefer
+   //   Create all cost costs
+   cost_builders_.emplace(LaneCostType::LANE_PREFERENCE_POLYGON,
+                          std::make_unique<LanePreferenceCostBuilder>(lane_preference_map));
+-  cost_builders_.emplace(LaneCostType::ROUTE_END, std::make_unique<EndOfRouteCostBuilder>(ends_of_route));
+   cost_builders_.emplace(LaneCostType::IMPATIENCE,
+                          std::make_unique<ImpatienceCostBuilder>(speed_constraints, impatience_integral));
++  if (planner_params_.behavior.activations.activate_lane_change_for_end_of_route) {
++    cost_builders_.emplace(LaneCostType::ROUTE_END, std::make_unique<EndOfRouteCostBuilder>(ends_of_route));
++  }
+   if (planner_params_.behavior.activations.activate_lane_change_for_vos) {
+     cost_builders_.emplace(LaneCostType::VEHICLE_ON_SHOULDER, std::make_unique<VehicleOnShoulderCostBuilder>());
+   }
+@@ -37,8 +39,12 @@ CombinedLaneCostPolicy LaneCostBuilder::buildLaneCosts(const PredictedScene& sce
+   CombinedLaneCostPolicy combined_policy(reference_lines);
+ 
+   for (const auto& [cost_type, builder] : cost_builders_) {
+-    const LaneCostPolicy& policy = builder->buildCostFunction(scene);
+-    combined_policy.addPolicy(cost_type, policy);
++    if (!scene.getLaneGraph().getEgoLaneRef()) {
++      combined_policy.addPolicy(cost_type, LaneCostPolicy());
++    } else {
++      const LaneCostPolicy& policy = builder->buildCostFunction(scene);
++      combined_policy.addPolicy(cost_type, policy);
++    }
+   }
+   return combined_policy;
+ }
+diff --git a/planning/situation_awareness/src/static_costs/lane_cost_builders/end_of_route_cost_builder.cpp b/planning/situation_awareness/src/static_costs/lane_cost_builders/end_of_route_cost_builder.cpp
+index bf7efaf77..16bdf8c27 100644
+--- a/planning/situation_awareness/src/static_costs/lane_cost_builders/end_of_route_cost_builder.cpp
++++ b/planning/situation_awareness/src/static_costs/lane_cost_builders/end_of_route_cost_builder.cpp
+@@ -2,6 +2,13 @@
+ 
+ #include <optional>
+ 
++namespace {
++inline const double roundToNearest(double value, double nearest)
++{
++  return std::round(value / nearest) * nearest;
++}
++} // namespace
++
+ enum class LaneChangeDirection
+ {
+   NONE,
+@@ -68,7 +75,7 @@ std::optional<int> numLaneChangesRequired(const lane_map::LaneRef& main_lr,
+                                           const maps::LaneSubMap& map, double lane_change_distance)
+ {
+   std::vector<lane_map::LaneRef> lanes_left_to_right =
+-      lane_map_utils::getLaneRefsInOrder(main_lr.getLaneGroupRef(), map);
++      lane_map_utils::getLaneRefsLeftToRight(main_lr.getLaneGroupRef(), map);
+ 
+   auto main_lr_it = std::find(lanes_left_to_right.begin(), lanes_left_to_right.end(), main_lr);
+   auto main_lr_it_reverse = std::make_reverse_iterator(std::next(main_lr_it));
+@@ -119,9 +126,12 @@ LaneCostPolicy EndOfRouteCostBuilder::buildCostFunction(const PredictedScene& sc
+   const ReferenceLines& reference_lines = scene.getReferenceLines();
+ 
+   const lane_map::LaneRef* ego_lane_ref = scene.getLaneGraph().getEgoLaneRef();
+-  assert(ego_lane_ref != nullptr);
++  if (!ego_lane_ref) {
++    return LaneCostPolicy();
++  }
++
+   std::vector<lane_map::LaneRef> lane_refs_left_to_right =
+-      lane_map_utils::getLaneRefsInOrder(ego_lane_ref->getLaneGroupRef(), scene.getLaneGraph().getMap());
++      lane_map_utils::getLaneRefsLeftToRight(ego_lane_ref->getLaneGroupRef(), scene.getLaneGraph().getMap());
+ 
+   // Get the list of lane IDs adjacent to us
+   std::vector<LaneID> lane_ids_in_order;
+@@ -163,7 +173,10 @@ LaneCostPolicy EndOfRouteCostBuilder::buildCostFunction(const PredictedScene& sc
+       const double lane_ref_span = lane_end_s - lane_start_s;
+       for (const double travel : { lane_start_s, lane_start_s + (lane_ref_span / 3.0),
+                                    lane_start_s + (2 * lane_ref_span / 3.0), lane_end_s }) {
+-        const double distance_to_map_end = lr_distance_to_map_end + (lane_end_s - travel);
++        // Round lane travel to the nearest 20m to avoid numerical issues
++        double lane_travel = lane_end_s - travel;
++        lane_travel = roundToNearest(lane_travel, 20.0);
++        const double distance_to_map_end = lr_distance_to_map_end + lane_travel;
+ 
+         double cost = 0.0;
+         if (n_lane_changes_required) {
+@@ -177,10 +190,15 @@ LaneCostPolicy EndOfRouteCostBuilder::buildCostFunction(const PredictedScene& sc
+           cost = MAX_COST;
+         }
+ 
+-        cost_pwl.setValueAtX(travel, cost);
++        // round cost to the nearest 0.01, travel to the nearest 20m
++        cost = roundToNearest(cost, 0.01);
++        const double travel_cost = roundToNearest(travel, 20.0);
++        cost_pwl.setValueAtX(travel_cost, cost);
+       }
+     }
+-    cost_per_lane_id.emplace(lane_id, LaneCost(std::move(cost_pwl)));
++    if (!cost_pwl.empty()) {
++      cost_per_lane_id.emplace(lane_id, LaneCost(std::move(cost_pwl)));
++    }
+   }
+ 
+   return cost_per_lane_id;
+diff --git a/planning/situation_awareness/src/static_costs/lane_cost_builders/impatience_cost_builder.cpp b/planning/situation_awareness/src/static_costs/lane_cost_builders/impatience_cost_builder.cpp
+index 80e267d92..cab1acf65 100644
+--- a/planning/situation_awareness/src/static_costs/lane_cost_builders/impatience_cost_builder.cpp
++++ b/planning/situation_awareness/src/static_costs/lane_cost_builders/impatience_cost_builder.cpp
+@@ -7,6 +7,18 @@
+ 
+ 
+ namespace planning {
++namespace {
++const LaneID getPotentialOvertakingLane(const PredictedScene& scene, const FrenetGraph& frenet_graph,
++                                        const lane_map::LaneRef* ego_lane_ref)
++{
++  if (!scene.isLeftHandDriveEnabled()) {
++    return frenet_utils::getConnection(frenet_graph, ego_lane_ref, basic_types::RelativeDirection::RIGHT);
++  } else {
++    return frenet_utils::getConnection(frenet_graph, ego_lane_ref, basic_types::RelativeDirection::LEFT);
++  }
++}
++} // namespace
++
+ ImpatienceCostBuilder::ImpatienceCostBuilder(
+     const std::unordered_map<LaneID, BehaviorSpeedConstraints>* speed_constraints, double& impatience_integral)
+   : impatience_integral_(impatience_integral), speed_constraints_(speed_constraints)
+@@ -32,8 +44,7 @@ LaneCostPolicy ImpatienceCostBuilder::buildCostFunction(const PredictedScene& sc
+ 
+   // We only add cost to the current lane when we can actually overtake, so we need to consider conditions on the
+   // potential_overtaking_lane as well
+-  const LaneID potential_overtaking_lane =
+-      frenet_utils::getConnection(frenet_graph, ego_lane_ref, basic_types::RelativeDirection::LEFT);
++  const LaneID potential_overtaking_lane = getPotentialOvertakingLane(scene, frenet_graph, ego_lane_ref);
+   if (potential_overtaking_lane == LaneID::UNDEFINED) {
+     // return empty lane cost if there is no left lane to overtake into.
+     LaneCostPolicy lane_cost_per_lane;
+@@ -49,14 +60,14 @@ LaneCostPolicy ImpatienceCostBuilder::buildCostFunction(const PredictedScene& sc
+   // least one element, so it's safe to just call `back()`.
+   const auto& mappery = scene.getLaneGraph();
+   std::vector<bool> lane_occupancy = mappery.getLaneOccupancy(*mappery.getEgoLane());
+-  bool in_rightmost_lane = lane_occupancy.back();
++  bool in_outermost_lane = lane_occupancy.back();
+ 
+   const SpeedLimitProfile speed_limit_profile =
+       speed_constraints_->at(ego_lane_id).constraints.at(BehaviorType::OVERTAKE);
+   updateCurrentOvertakeVehicle(speed_limit_profile, scene, ego_lane_id);
+   updateImpatience(speed_limit_profile, scene);
+ 
+-  if (!in_rightmost_lane || isEgoBelowMinSpeed(scene) || isNoOvertakeZoneClose(scene) ||
++  if (!in_outermost_lane || isEgoBelowMinSpeed(scene) || isNoOvertakeZoneClose(scene) ||
+       !isOverallTrafficOk(scene, potential_overtaking_lane) ||
+       !isOvertakeLaneTrafficOk(scene, potential_overtaking_lane)) {
+     impatience_integral_ = 0.0;
+diff --git a/planning/situation_awareness/src/static_costs/lane_cost_builders/lane_preference_cost_builder.cpp b/planning/situation_awareness/src/static_costs/lane_cost_builders/lane_preference_cost_builder.cpp
+index aa2ea8c5c..1317baa95 100644
+--- a/planning/situation_awareness/src/static_costs/lane_cost_builders/lane_preference_cost_builder.cpp
++++ b/planning/situation_awareness/src/static_costs/lane_cost_builders/lane_preference_cost_builder.cpp
+@@ -1,13 +1,25 @@
+ #include "situation_awareness/static_costs/lane_cost_builders/lane_preference_cost_builder.h"
+ 
+-#include "situation_awareness/static_costs/lane_cost_builders/lane_preference_cost_builder_helpers/lane_preferences_cost_builder_helpers.h"
+ #include "maps/utils/lane_map_following.h"
+-#include "situation_awareness/static_costs/lane_cost_builders/merging/merging_utils.h"
+ #include "planning_common/utils/frenet_utils.h"
+ #include "planning_common/utils/scene_utils.h"
++#include "situation_awareness/static_costs/lane_cost_builders/lane_preference_cost_builder_helpers/lane_preferences_cost_builder_helpers.h"
++#include "situation_awareness/static_costs/lane_cost_builders/merging/merging_utils.h"
+ 
+ namespace planning {
+ 
++namespace {
++std::vector<lane_map::LaneRef> getCurrentLanesInOrder(const PredictedScene& scene, const lane_map::LaneGroupRef& lg_ref,
++                                                      const maps::LaneSubMap& map)
++{
++  if (!scene.isLeftHandDriveEnabled()) {
++    return lane_map_utils::getLaneRefsLeftToRight(lg_ref, map);
++  } else {
++    return lane_map_utils::getLaneRefsRightToLeft(lg_ref, map);
++  }
++}
++} // namespace
++
+ LanePreferenceCostBuilder::LanePreferenceCostBuilder(const lane_map::PolygonFeatureList* lane_preference_map)
+   : lane_preference_map_(lane_preference_map)
+ {
+@@ -74,7 +86,7 @@ void LanePreferenceCostBuilder::addCostForLaneGroup(const lane_map::LaneGroupRef
+ 
+   // This gets the lanes in from the lane group with the left most lane at the front and then moving
+   // right with increasing index
+-  std::vector<lane_map::LaneRef> current_lanes_in_order = lane_map_utils::getLaneRefsInOrder(lg_ref, mappery.getMap());
++  std::vector<lane_map::LaneRef> current_lanes_in_order = getCurrentLanesInOrder(scene, lg_ref, mappery.getMap());
+ 
+   // The smallest cost section is a lane ref so here we determine the cost for the left right lanes
+   // in this lane group
+@@ -86,7 +98,8 @@ void LanePreferenceCostBuilder::addCostForLaneGroup(const lane_map::LaneGroupRef
+   const ReferenceLines& reference_lines = scene.getReferenceLines();
+   for (const lane_map::LaneRef& lane_ref : current_lanes_in_order) {
+     if (!scene.getLaneIDTracker().hasLaneID(lane_ref)) {
+-      ROS_WARN("We expected there to be a LaneID but there was none for a lane in getLaneRefsInOrder()");
++      ROS_WARN(
++          "We expected there to be a LaneID but there was none for a lane in getLaneRefsLeftToRight()/getLaneRefsRightToLeft()");
+       continue;
+     }
+     const LaneID lane_id = scene.getLaneID(lane_ref);
+@@ -147,8 +160,8 @@ std::unordered_map<lane_map::LaneRef, double> LanePreferenceCostBuilder::getCost
+   //   ^   _             _
+   //   |     _             _
+   // Cost . . . p . . . . . . p . . . .
+-  fillCostsRightToLeft(start_cost, mappery, current_lanes_in_order, group_preferences, distances_until_merge_transition,
+-                       &cost_per_lane_ref);
++  fillCostsOuterToInner(start_cost, mappery, current_lanes_in_order, group_preferences,
++                        distances_until_merge_transition, &cost_per_lane_ref);
+ 
+   // Do the last pass from left while taking the min of the current and suggested cost from the
+   // pass
+@@ -158,7 +171,7 @@ std::unordered_map<lane_map::LaneRef, double> LanePreferenceCostBuilder::getCost
+   //   |     _     _       _     _
+   // Cost . . . p . . . . . . p . . . .
+   // DONE!
+-  fillCostsLeftToRight(mappery, current_lanes_in_order, group_preferences, &cost_per_lane_ref);
++  fillCostsInnerToOuter(mappery, current_lanes_in_order, group_preferences, &cost_per_lane_ref);
+ 
+   return cost_per_lane_ref;
+ }
+diff --git a/planning/situation_awareness/src/static_costs/lane_cost_builders/lane_preference_cost_builder_helpers/lane_preferences_cost_builder_helpers.cpp b/planning/situation_awareness/src/static_costs/lane_cost_builders/lane_preference_cost_builder_helpers/lane_preferences_cost_builder_helpers.cpp
+index bbf13e694..aed7cd65e 100644
+--- a/planning/situation_awareness/src/static_costs/lane_cost_builders/lane_preference_cost_builder_helpers/lane_preferences_cost_builder_helpers.cpp
++++ b/planning/situation_awareness/src/static_costs/lane_cost_builders/lane_preference_cost_builder_helpers/lane_preferences_cost_builder_helpers.cpp
+@@ -40,16 +40,16 @@ bool isHighCostLane(const lane_map::LaneRef& lane_ref, const Mappery& mappery,
+ 
+ namespace planning {
+ 
+-void fillCostsRightToLeft(double init_cost, const Mappery& mappery,
+-                          const std::vector<lane_map::LaneRef>& current_lanes_in_order,
+-                          const lane_map::LanePreferenceInfo& group_preferences,
+-                          const std::unordered_map<lane_map::LaneRef, double>& distances_until_merge_transition,
+-                          std::unordered_map<lane_map::LaneRef, double>* cost_per_lane_ref)
++void fillCostsOuterToInner(double init_cost, const Mappery& mappery,
++                           const std::vector<lane_map::LaneRef>& current_lanes_in_order,
++                           const lane_map::LanePreferenceInfo& group_preferences,
++                           const std::unordered_map<lane_map::LaneRef, double>& distances_until_merge_transition,
++                           std::unordered_map<lane_map::LaneRef, double>* cost_per_lane_ref)
+ {
+   assert(!current_lanes_in_order.empty());
+ 
+   const std::vector<std::unordered_set<lane_map::LaneRef>> right_merging_lrs_groups =
+-      rightMergingLaneRefs(current_lanes_in_order, distances_until_merge_transition);
++      findMergingLaneRefs(current_lanes_in_order, distances_until_merge_transition);
+ 
+   double cost = init_cost;
+   for (auto rit = current_lanes_in_order.rbegin(); rit != current_lanes_in_order.rend(); ++rit) {
+@@ -90,9 +90,9 @@ void fillCostsRightToLeft(double init_cost, const Mappery& mappery,
+   }
+ }
+ 
+-void fillCostsLeftToRight(const Mappery& mappery, const std::vector<lane_map::LaneRef>& current_lanes_in_order,
+-                          const lane_map::LanePreferenceInfo& group_preferences,
+-                          std::unordered_map<lane_map::LaneRef, double>* cost_per_lane_ref)
++void fillCostsInnerToOuter(const Mappery& mappery, const std::vector<lane_map::LaneRef>& current_lanes_in_order,
++                           const lane_map::LanePreferenceInfo& group_preferences,
++                           std::unordered_map<lane_map::LaneRef, double>* cost_per_lane_ref)
+ {
+   double cost = std::numeric_limits<double>::infinity();
+   for (size_t i = 0; i < current_lanes_in_order.size(); ++i) {
+diff --git a/planning/situation_awareness/src/static_costs/lane_cost_builders/merging/merging_utils.cpp b/planning/situation_awareness/src/static_costs/lane_cost_builders/merging/merging_utils.cpp
+index 52e16982e..9340a3e97 100644
+--- a/planning/situation_awareness/src/static_costs/lane_cost_builders/merging/merging_utils.cpp
++++ b/planning/situation_awareness/src/static_costs/lane_cost_builders/merging/merging_utils.cpp
+@@ -54,8 +54,8 @@ std::pair<bool, std::size_t> hasUpcomingMergeTransition(
+ /// merging together with just the "distances_until_merge_transition" - consider what we information we can compute
+ /// upstream that would make this easier to use.
+ std::vector<std::unordered_set<lane_map::LaneRef>>
+-rightMergingLaneRefs(const std::vector<lane_map::LaneRef>& current_lanes_in_order,
+-                     const std::unordered_map<lane_map::LaneRef, double>& distances_until_merge_transition)
++findMergingLaneRefs(const std::vector<lane_map::LaneRef>& current_lanes_in_order,
++                    const std::unordered_map<lane_map::LaneRef, double>& distances_until_merge_transition)
+ {
+   assert(!current_lanes_in_order.empty());
+ 
+diff --git a/planning/situation_awareness/src/static_costs/lane_cost_builders/vehicle_on_shoulder_cost_builder.cpp b/planning/situation_awareness/src/static_costs/lane_cost_builders/vehicle_on_shoulder_cost_builder.cpp
+index 6bce9fbbb..92f2656bb 100644
+--- a/planning/situation_awareness/src/static_costs/lane_cost_builders/vehicle_on_shoulder_cost_builder.cpp
++++ b/planning/situation_awareness/src/static_costs/lane_cost_builders/vehicle_on_shoulder_cost_builder.cpp
+@@ -7,6 +7,28 @@
+ 
+ namespace planning {
+ 
++namespace {
++const LaneID getOuterMostLaneId(const PredictedScene& scene, const FrenetGraph& frenet_graph)
++{
++  if (!scene.isLeftHandDriveEnabled()) {
++    return frenet_utils::getFarLaneInDirection(basic_types::RelativeDirection::RIGHT,
++                                               scene.getLaneGraph().getEgoLaneRef(), frenet_graph);
++  } else {
++    return frenet_utils::getFarLaneInDirection(basic_types::RelativeDirection::LEFT,
++                                               scene.getLaneGraph().getEgoLaneRef(), frenet_graph);
++  }
++}
++
++const std::vector<ObjectID>& getObjectsInOuterLane(const PredictedScene& scene)
++{
++  if (!scene.isLeftHandDriveEnabled()) {
++    return scene.getObjectsInLane(LaneID::RIGHT_SHOULDER);
++  } else {
++    return scene.getObjectsInLane(LaneID::LEFT_SHOULDER);
++  }
++}
++} // namespace
++
+ LaneCostPolicy VehicleOnShoulderCostBuilder::buildCostFunction(const PredictedScene& scene)
+ {
+   const ReferenceLines& reference_lines = scene.getReferenceLines();
+@@ -21,26 +43,25 @@ LaneCostPolicy VehicleOnShoulderCostBuilder::buildCostFunction(const PredictedSc
+     piecewise_linear_per_lane[lane_id] = PiecewiseLinear(zero_init_points);
+   }
+ 
+-  const LaneID right_most_lane_id = frenet_utils::getFarLaneInDirection(
+-      basic_types::RelativeDirection::RIGHT, scene.getLaneGraph().getEgoLaneRef(), frenet_graph);
+-  if (!scene.getReferenceLines().containsID(right_most_lane_id)) {
++  const LaneID outer_most_lane_id = getOuterMostLaneId(scene, frenet_graph);
++  if (!scene.getReferenceLines().containsID(outer_most_lane_id)) {
+     return LaneCostPolicy();
+   }
+ 
+-  const std::vector<ObjectID>& right_vos = scene.getObjectsInLane(LaneID::RIGHT_SHOULDER);
++  const std::vector<ObjectID>& outer_lane_vos = getObjectsInOuterLane(scene);
+   const double ego_object_width = scene.getEgoObject().width();
+-  const ReferenceLine& ref_line = scene.getReferenceLines().getLineFromID(right_most_lane_id);
++  const ReferenceLine& ref_line = scene.getReferenceLines().getLineFromID(outer_most_lane_id);
+ 
+   double backward_cost_distance_from_vos = planner_params_.behavior.activations.backward_cost_distance_from_vos;
+   double forward_cost_distance_from_vos = planner_params_.behavior.activations.forward_cost_distance_from_vos;
+ 
+   std::vector<std::pair<OBB, double>> vos_objects;
+-  for (const auto& id : right_vos) {
++  for (const auto& id : outer_lane_vos) {
+     vos_objects.push_back({ distance_check::obbCartesian(scene.getPredictedObject(id)),
+-                            scene.getPredictedObject(id).getFrenetState(right_most_lane_id).s.x });
++                            scene.getPredictedObject(id).getFrenetState(outer_most_lane_id).s.x });
+   }
+-  piecewise_linear_per_lane.at(right_most_lane_id) =
+-      rightMostLaneCost(right_most_lane_id, ref_line, vos_objects, ego_object_width, backward_cost_distance_from_vos,
++  piecewise_linear_per_lane.at(outer_most_lane_id) =
++      outerMostLaneCost(outer_most_lane_id, ref_line, vos_objects, ego_object_width, backward_cost_distance_from_vos,
+                         forward_cost_distance_from_vos);
+ 
+   LaneCostPolicy lane_cost_per_lane;
+@@ -52,7 +73,7 @@ LaneCostPolicy VehicleOnShoulderCostBuilder::buildCostFunction(const PredictedSc
+   return lane_cost_per_lane;
+ }
+ 
+-PiecewiseLinear VehicleOnShoulderCostBuilder::rightMostLaneCost(const LaneID& right_most_lane_id,
++PiecewiseLinear VehicleOnShoulderCostBuilder::outerMostLaneCost(const LaneID& outer_most_lane_id,
+                                                                 const ReferenceLine& ref_line,
+                                                                 const std::vector<std::pair<OBB, double>>& vos_objects,
+                                                                 double ego_object_width,
+@@ -62,7 +83,7 @@ PiecewiseLinear VehicleOnShoulderCostBuilder::rightMostLaneCost(const LaneID& ri
+   double cost = 0.0;
+   std::vector<geometry_msgs::Point> zero_init_points = { geometry_msgs::createPoint(ref_line.getMinS(), 0.0),
+                                                          geometry_msgs::createPoint(ref_line.getMaxS(), 0.0) };
+-  PiecewiseLinear right_most_lane_cost(zero_init_points);
++  PiecewiseLinear outer_most_lane_cost(zero_init_points);
+ 
+   for (const auto& vos_object : vos_objects) {
+     PiecewiseLinear vos_cost;
+@@ -91,10 +112,10 @@ PiecewiseLinear VehicleOnShoulderCostBuilder::rightMostLaneCost(const LaneID& ri
+       vos_cost.setValueAtX(vos_travel + forward_cost_distance_from_vos, cost);
+       vos_cost.setValueAtX(vos_travel + forward_cost_distance_from_vos + 10, 0);
+ 
+-      right_most_lane_cost += vos_cost;
++      outer_most_lane_cost += vos_cost;
+     }
+   }
+-  return right_most_lane_cost;
++  return outer_most_lane_cost;
+ }
+ 
+ } // namespace planning
+diff --git a/planning/situation_awareness/test/test_upcoming_merge_cost_builder.cpp b/planning/situation_awareness/test/test_upcoming_merge_cost_builder.cpp
+index bc35e75c7..ba1bb10f1 100644
+--- a/planning/situation_awareness/test/test_upcoming_merge_cost_builder.cpp
++++ b/planning/situation_awareness/test/test_upcoming_merge_cost_builder.cpp
+@@ -30,7 +30,8 @@ TEST(MergingRefsTest, CostBuilderTest)
+ 
+ } // namespace
+ 
+-int main(int argc, char** argv){
++int main(int argc, char** argv)
++{
+   testing::InitGoogleTest(&argc, argv);
+   return RUN_ALL_TESTS();
+ }
+diff --git a/planning/situation_awareness/test/test_upcoming_merge_transitions.cpp b/planning/situation_awareness/test/test_upcoming_merge_transitions.cpp
+index 8e4067d09..2cf27b2e9 100644
+--- a/planning/situation_awareness/test/test_upcoming_merge_transitions.cpp
++++ b/planning/situation_awareness/test/test_upcoming_merge_transitions.cpp
+@@ -1,8 +1,8 @@
+ 
+ #include <gtest/gtest.h>
+ 
+-#include "situation_awareness/static_costs/lane_cost_builders/merging/merging_utils.h"
+ #include "situation_awareness/static_costs/lane_cost_builders/lane_preference_cost_builder_helpers/lane_preferences_cost_builder_helpers.h"
++#include "situation_awareness/static_costs/lane_cost_builders/merging/merging_utils.h"
+ 
+ namespace {
+ 
+@@ -35,7 +35,7 @@ TEST(MergingRefsTest, UpcomingMerge)
+     ASSERT_EQ(0, lr3_index2);
+ 
+     std::vector<lane_map::LaneRef> current_lanes_in_order{ lr5, lr4, lr3, lr2 };
+-    auto merges = planning::rightMergingLaneRefs(current_lanes_in_order, distances_until_merge_transition);
++    auto merges = planning::findMergingLaneRefs(current_lanes_in_order, distances_until_merge_transition);
+ 
+     ASSERT_EQ(2, merges.size());
+ 
+@@ -69,7 +69,7 @@ TEST(MergingRefsTest, UpcomingMerge)
+     ASSERT_TRUE(lr3_merge2);
+ 
+     std::vector<lane_map::LaneRef> current_lanes_in_order{ lr5, lr4, lr3, lr2 };
+-    auto merges = planning::rightMergingLaneRefs(current_lanes_in_order, distances_until_merge_transition);
++    auto merges = planning::findMergingLaneRefs(current_lanes_in_order, distances_until_merge_transition);
+ 
+     ASSERT_EQ(1, merges.size());
+     ASSERT_EQ(3, merges.front().size());
+@@ -91,8 +91,8 @@ TEST(MergingRefsTest, FillingCostsFromLeftToRight)
+                                                                                           { lr3, 550. } };
+     std::unordered_map<lane_map::LaneRef, double> cost_per_lane_ref{ { lr2, 0 }, { lr3, 0 }, { lr4, 0 }, { lr5, 0 } };
+ 
+-    planning::fillCostsRightToLeft(0.0, {}, { lr5, lr4, lr3, lr2 }, { {}, {} }, distances_until_merge_transition,
+-                                   &cost_per_lane_ref);
++    planning::fillCostsOuterToInner(0.0, {}, { lr5, lr4, lr3, lr2 }, { {}, {} }, distances_until_merge_transition,
++                                    &cost_per_lane_ref);
+     EXPECT_EQ(0.0, cost_per_lane_ref[lr2]);
+     EXPECT_EQ(0.0, cost_per_lane_ref[lr3]);
+     EXPECT_EQ(0.0, cost_per_lane_ref[lr4]);
+@@ -105,8 +105,8 @@ TEST(MergingRefsTest, FillingCostsFromLeftToRight)
+                                                                                           { lr3, 187.5 } };
+     std::unordered_map<lane_map::LaneRef, double> cost_per_lane_ref{ { lr2, 0 }, { lr3, 0 }, { lr4, 0 }, { lr5, 0 } };
+ 
+-    planning::fillCostsRightToLeft(0.0, {}, { lr5, lr4, lr3, lr2 }, { {}, {} }, distances_until_merge_transition,
+-                                   &cost_per_lane_ref);
++    planning::fillCostsOuterToInner(0.0, {}, { lr5, lr4, lr3, lr2 }, { {}, {} }, distances_until_merge_transition,
++                                    &cost_per_lane_ref);
+     EXPECT_EQ(0.0, cost_per_lane_ref[lr2]);
+     EXPECT_EQ(0.0, cost_per_lane_ref[lr3]);
+     EXPECT_EQ(0.0, cost_per_lane_ref[lr4]);
+@@ -118,8 +118,8 @@ TEST(MergingRefsTest, FillingCostsFromLeftToRight)
+     const std::unordered_map<lane_map::LaneRef, double> distances_until_merge_transition{};
+     std::unordered_map<lane_map::LaneRef, double> cost_per_lane_ref{ { lr2, 0 }, { lr3, 0 }, { lr4, 0 }, { lr5, 0 } };
+ 
+-    planning::fillCostsRightToLeft(0.0, {}, { lr5, lr4, lr3, lr2 }, { {}, {} }, distances_until_merge_transition,
+-                                   &cost_per_lane_ref);
++    planning::fillCostsOuterToInner(0.0, {}, { lr5, lr4, lr3, lr2 }, { {}, {} }, distances_until_merge_transition,
++                                    &cost_per_lane_ref);
+     EXPECT_EQ(0.0, cost_per_lane_ref[lr2]);
+     EXPECT_EQ(0.25, cost_per_lane_ref[lr3]);
+     EXPECT_EQ(0.5, cost_per_lane_ref[lr4]);
+@@ -131,8 +131,8 @@ TEST(MergingRefsTest, FillingCostsFromLeftToRight)
+     const std::unordered_map<lane_map::LaneRef, double> distances_until_merge_transition{ { lr2, 187. } };
+     std::unordered_map<lane_map::LaneRef, double> cost_per_lane_ref{ { lr2, 0 }, { lr3, 0 }, { lr4, 0 }, { lr5, 0 } };
+ 
+-    planning::fillCostsRightToLeft(0.0, {}, { lr5, lr4, lr3, lr2 }, { {}, {} }, distances_until_merge_transition,
+-                                   &cost_per_lane_ref);
++    planning::fillCostsOuterToInner(0.0, {}, { lr5, lr4, lr3, lr2 }, { {}, {} }, distances_until_merge_transition,
++                                    &cost_per_lane_ref);
+     EXPECT_EQ(0.0, cost_per_lane_ref[lr2]);
+     EXPECT_EQ(0.0, cost_per_lane_ref[lr3]);
+     EXPECT_EQ(0.25, cost_per_lane_ref[lr4]);
+@@ -144,8 +144,8 @@ TEST(MergingRefsTest, FillingCostsFromLeftToRight)
+     const std::unordered_map<lane_map::LaneRef, double> distances_until_merge_transition{ { lr5, 187. } };
+     std::unordered_map<lane_map::LaneRef, double> cost_per_lane_ref{ { lr2, 0 }, { lr3, 0 }, { lr4, 0 }, { lr5, 0 } };
+ 
+-    planning::fillCostsRightToLeft(0.0, {}, { lr5, lr4, lr3, lr2 }, { {}, {} }, distances_until_merge_transition,
+-                                   &cost_per_lane_ref);
++    planning::fillCostsOuterToInner(0.0, {}, { lr5, lr4, lr3, lr2 }, { {}, {} }, distances_until_merge_transition,
++                                    &cost_per_lane_ref);
+     EXPECT_EQ(0.0, cost_per_lane_ref[lr2]);
+     EXPECT_EQ(0.25, cost_per_lane_ref[lr3]);
+     EXPECT_EQ(0.5, cost_per_lane_ref[lr4]);

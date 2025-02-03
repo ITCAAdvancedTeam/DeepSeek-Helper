@@ -1,0 +1,92 @@
+diff --git a/mapping/maps/src/maps_py/BUILD b/mapping/maps/src/maps_py/BUILD
+new file mode 100644
+index 000000000..54a86bb34
+--- /dev/null
++++ b/mapping/maps/src/maps_py/BUILD
+@@ -0,0 +1,13 @@
++load("@pybind11_bazel//:build_defs.bzl", "pybind_extension")
++
++pybind_extension(
++    name = "maps_py",
++    srcs = ["maps_py.cpp"],
++    visibility = ["//mapping/maps:__pkg__"],
++    deps = [
++        "//mapping/maps:map_utils",
++        "//tools/diagnostics_utils:diagnostics_utils_cc",
++        "@fmt",
++        "@geographiclib",
++    ],
++)
+diff --git a/mapping/maps/src/maps_py/maps_py.cpp b/mapping/maps/src/maps_py/maps_py.cpp
+index 056ae8eb7..20b144e6a 100644
+--- a/mapping/maps/src/maps_py/maps_py.cpp
++++ b/mapping/maps/src/maps_py/maps_py.cpp
+@@ -12,9 +12,56 @@
+ #include <GeographicLib/TransverseMercator.hpp>
+ #include <future>
+ #include <thread>
++#ifdef BAZEL
++#include <sstream>
++#endif
+ 
+ namespace py = pybind11;
+ 
++// When building with Bazel, the version of fmt requires the specializations below for the LaneRef and LaneGroupRef
++#ifdef BAZEL
++namespace fmt {
++
++// Formatter specialization for lane_map::LaneRef
++template <>
++struct formatter<lane_map::LaneRef>
++{
++  constexpr auto parse(format_parse_context& ctx)
++  {
++    return ctx.begin();
++  }
++
++  template <typename FormatContext>
++  auto format(const lane_map::LaneRef& ref, FormatContext& ctx)
++  {
++    std::ostringstream oss;
++    oss << ref; // Use the overloaded operator<<
++    return format_to(ctx.out(), "{}", oss.str());
++  }
++};
++
++// Formatter specialization for lane_map::LaneGroupRef
++template <>
++struct formatter<lane_map::LaneGroupRef>
++{
++  constexpr auto parse(format_parse_context& ctx)
++  {
++    return ctx.begin();
++  }
++
++  template <typename FormatContext>
++  auto format(const lane_map::LaneGroupRef& ref, FormatContext& ctx)
++  {
++    std::ostringstream oss;
++    oss << ref; // Use the overloaded operator<<
++    return format_to(ctx.out(), "{}", oss.str());
++  }
++};
++
++} // namespace fmt
++
++#endif
++
+ enum CoordSys
+ {
+   LATLON,
+@@ -149,7 +196,11 @@ class MapLoadingFuture
+   }
+ };
+ 
++#ifdef BAZEL
++PYBIND11_MODULE(maps_py, m) // No __init__.py file with Bazel
++#else
+ PYBIND11_MODULE(_maps_py, m) // must be the same name as the library
++#endif
+ {
+   py::class_<lane_map::LaneRef>(m, "LaneRef")
+       .def(py::init<>())

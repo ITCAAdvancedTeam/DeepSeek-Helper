@@ -1,0 +1,453 @@
+diff --git a/msgs/perception_msgs/migration/CameraBoundingBox.bmr b/msgs/perception_msgs/migration/CameraBoundingBox.bmr
+new file mode 100644
+index 000000000..5a2653b82
+--- /dev/null
++++ b/msgs/perception_msgs/migration/CameraBoundingBox.bmr
+@@ -0,0 +1,84 @@
++class update_perception_msgs_CameraBoundingBox_f727e22c7f5d21a9aaad59e99b8e402f(MessageUpdateRule):
++	old_type = "perception_msgs/CameraBoundingBox"
++	old_full_text = """
++# Enumeration of object types
++# Note there is a hard coded map in camera_cuboid_detector.cpp, ensure to update the map
++# appropriately, if this is changed.
++uint8 UNDEFINED=0
++uint8 SIGN=1
++uint8 CONSTRUCTION_SIGN=2
++uint8 DELINEATOR=3
++uint8 CONSTRUCTION_DELINEATOR=4
++uint8 PEDESTRIAN=5
++uint8 DEBRIS=6
++uint8 POTHOLE=7
++
++# Location and size of the object in image space in 0-1 units
++float32 x_min
++float32 y_min
++float32 x_max
++float32 y_max
++
++# confidence
++float32 confidence
++
++# type of detection
++uint8 type
++"""
++
++	new_type = "perception_msgs/CameraBoundingBox"
++	new_full_text = """
++# Enumeration of object types
++# Note there is a hard coded map in camera_cuboid_detector.cpp, ensure to update the map
++# appropriately, if this is changed.
++uint8 UNDEFINED=0
++# values 1-3 are from CameraCuboid.msg
++uint8 CAR=1
++uint8 TRUCK=2
++uint8 MOTORCYCLE=3
++uint8 SIGN=4
++uint8 CONSTRUCTION_SIGN=5
++uint8 DELINEATOR=6
++uint8 CONSTRUCTION_DELINEATOR=7
++uint8 PEDESTRIAN=8
++uint8 DEBRIS=9
++uint8 POTHOLE=10
++uint8 SPEED_SIGN=11
++
++# Location and size of the object in image space in 0-1 units
++float32 x_min
++float32 y_min
++float32 x_max
++float32 y_max
++
++# confidence
++float32 confidence
++
++# type of detection
++uint8 type
++
++# Used for SPEED_SIGN only
++float32 speed_limit_sign_limit
++"""
++
++	order = 0
++	migrated_types = []
++
++	valid = True
++
++	def update(self, old_msg, new_msg):
++		#Constant 'PEDESTRIAN' has changed
++		#Constant 'DEBRIS' has changed
++		#Constant 'POTHOLE' has changed
++		#Constant 'CONSTRUCTION_DELINEATOR' has changed
++		#Constant 'DELINEATOR' has changed
++		#Constant 'SIGN' has changed
++		#Constant 'CONSTRUCTION_SIGN' has changed
++		new_msg.x_min = old_msg.x_min
++		new_msg.y_min = old_msg.y_min
++		new_msg.x_max = old_msg.x_max
++		new_msg.y_max = old_msg.y_max
++		new_msg.confidence = old_msg.confidence
++		new_msg.type = old_msg.type if old_msg.type == 0 else old_msg.type + 3
++		#No matching field name in old message
++		new_msg.speed_limit_sign_limit = 0
+diff --git a/msgs/perception_msgs/migration/CameraLidarObject.bmr b/msgs/perception_msgs/migration/CameraLidarObject.bmr
+new file mode 100644
+index 000000000..2fdd4e011
+--- /dev/null
++++ b/msgs/perception_msgs/migration/CameraLidarObject.bmr
+@@ -0,0 +1,129 @@
++class update_perception_msgs_CameraLidarObject_e58b1b029a5babcdd1d2f12c2e56ded8(MessageUpdateRule):
++	old_type = "perception_msgs/CameraLidarObject"
++	old_full_text = """
++# Enumeration of object classes/types
++# Note there is a hard coded map in camera_cuboid_detector package, ensure to update the map
++# appropriately, if this is changed.
++uint8 UNDEFINED=0
++uint8 VEHICLE=1
++
++# Header include information of lidar measurement:
++Header header
++
++# Additional camera header includes the info of the image frame used for association:
++Header image_header
++
++# Mean and covariance of associated lidar cluster:
++float32[3] position_mean
++float32[9] position_cov
++
++# Object class/type:
++uint8 type
++
++# For debug: Camera box in image frame [defined from 0. to 1.]:
++float32 debug_camera_box_min_x
++float32 debug_camera_box_min_y
++float32 debug_camera_box_max_x
++float32 debug_camera_box_max_y
++
++# For debug: Extend of lidar extension as box in image frame [defined from 0. to 1.]::
++float32 debug_lidar_box_min_x
++float32 debug_lidar_box_min_y
++float32 debug_lidar_box_max_x
++float32 debug_lidar_box_max_y
++
++================================================================================
++MSG: std_msgs/Header
++# Standard metadata for higher-level stamped data types.
++# This is generally used to communicate timestamped data
++# in a particular coordinate frame.
++#
++# sequence ID: consecutively increasing ID
++uint32 seq
++#Two-integer timestamp that is expressed as:
++# * stamp.sec: seconds (stamp_secs) since epoch (in Python the variable is called 'secs')
++# * stamp.nsec: nanoseconds since stamp_secs (in Python the variable is called 'nsecs')
++# time-handling sugar is provided by the client library
++time stamp
++#Frame this data is associated with
++string frame_id
++"""
++
++	new_type = "perception_msgs/CameraLidarObject"
++	new_full_text = """
++# Enumeration of object classes/types
++# Note there is a hard coded map in camera_cuboid_detector package, ensure to update the map
++# appropriately, if this is changed.
++uint8 UNDEFINED=0
++uint8 VEHICLE=1
++uint8 CONSTRUCTION=2
++uint8 DEBRIS=3
++uint8 SPEED_SIGN=4
++
++# Header include information of lidar measurement:
++Header header
++
++# Additional camera header includes the info of the image frame used for association:
++Header image_header
++
++# Mean and covariance of associated lidar cluster:
++float32[3] position_mean
++float32[9] position_cov
++
++# Object class/type:
++uint8 type
++
++# Only for speed sign
++float32 speed_limit_sign_limit
++
++# For debug: Camera box in image frame [defined from 0. to 1.]:
++float32 debug_camera_box_min_x
++float32 debug_camera_box_min_y
++float32 debug_camera_box_max_x
++float32 debug_camera_box_max_y
++
++# For debug: Extend of lidar extension as box in image frame [defined from 0. to 1.]::
++float32 debug_lidar_box_min_x
++float32 debug_lidar_box_min_y
++float32 debug_lidar_box_max_x
++float32 debug_lidar_box_max_y
++
++================================================================================
++MSG: std_msgs/Header
++# Standard metadata for higher-level stamped data types.
++# This is generally used to communicate timestamped data
++# in a particular coordinate frame.
++#
++# sequence ID: consecutively increasing ID
++uint32 seq
++#Two-integer timestamp that is expressed as:
++# * stamp.sec: seconds (stamp_secs) since epoch (in Python the variable is called 'secs')
++# * stamp.nsec: nanoseconds since stamp_secs (in Python the variable is called 'nsecs')
++# time-handling sugar is provided by the client library
++time stamp
++#Frame this data is associated with
++string frame_id
++"""
++
++	order = 0
++	migrated_types = [
++		("Header","Header"),]
++
++	valid = True
++
++	def update(self, old_msg, new_msg):
++		self.migrate(old_msg.header, new_msg.header)
++		self.migrate(old_msg.image_header, new_msg.image_header)
++		new_msg.position_mean = old_msg.position_mean
++		new_msg.position_cov = old_msg.position_cov
++		new_msg.type = old_msg.type
++		#No matching field name in old message
++		new_msg.speed_limit_sign_limit = 0
++		new_msg.debug_camera_box_min_x = old_msg.debug_camera_box_min_x
++		new_msg.debug_camera_box_min_y = old_msg.debug_camera_box_min_y
++		new_msg.debug_camera_box_max_x = old_msg.debug_camera_box_max_x
++		new_msg.debug_camera_box_max_y = old_msg.debug_camera_box_max_y
++		new_msg.debug_lidar_box_min_x = old_msg.debug_lidar_box_min_x
++		new_msg.debug_lidar_box_min_y = old_msg.debug_lidar_box_min_y
++		new_msg.debug_lidar_box_max_x = old_msg.debug_lidar_box_max_x
++		new_msg.debug_lidar_box_max_y = old_msg.debug_lidar_box_max_y
+diff --git a/msgs/perception_msgs/msg/CameraLidarObject.msg b/msgs/perception_msgs/msg/CameraLidarObject.msg
+index becb1da06..9dd95aa5f 100644
+--- a/msgs/perception_msgs/msg/CameraLidarObject.msg
++++ b/msgs/perception_msgs/msg/CameraLidarObject.msg
+@@ -3,6 +3,9 @@
+ # appropriately, if this is changed.
+ uint8 UNDEFINED=0
+ uint8 VEHICLE=1
++uint8 CONSTRUCTION=2
++uint8 DEBRIS=3
++uint8 SPEED_LIMIT_SIGN=4
+ 
+ # Header include information of lidar measurement:
+ Header header
+@@ -17,15 +20,17 @@ float32[9] position_cov
+ # Object class/type:
+ uint8 type
+ 
++# Only for speed limit sign
++float32 speed_limit_sign_limit
++
+ # For debug: Camera box in image frame [defined from 0. to 1.]:
+-float32 debug_camera_box_min_x 
++float32 debug_camera_box_min_x
+ float32 debug_camera_box_min_y
+-float32 debug_camera_box_max_x 
++float32 debug_camera_box_max_x
+ float32 debug_camera_box_max_y
+ 
+ # For debug: Extend of lidar extension as box in image frame [defined from 0. to 1.]::
+-float32 debug_lidar_box_min_x 
++float32 debug_lidar_box_min_x
+ float32 debug_lidar_box_min_y
+-float32 debug_lidar_box_max_x 
++float32 debug_lidar_box_max_x
+ float32 debug_lidar_box_max_y
+-
+diff --git a/msgs/perception_msgs/msg/LocalizationGen3.msg b/msgs/perception_msgs/msg/LocalizationGen3.msg
+new file mode 100644
+index 000000000..4c07fd205
+--- /dev/null
++++ b/msgs/perception_msgs/msg/LocalizationGen3.msg
+@@ -0,0 +1,18 @@
++Header header
++trace_msgs/TraceId trace_id
++
++# gps Localized position:
++float64 latitude
++float64 longitude
++
++# gps Heading in degrees NED, clockwise
++float32 heading
++
++# If true, we're not localized
++bool invalid
++
++# particle filter confidence (2 standard devations), in vehicle frame
++geometry_msgs/Vector3 confidence_vehicle
++
++# correction applied to raw gps position, in vehicle frame
++geometry_msgs/Vector3 correction_vehicle
+diff --git a/msgs/perception_msgs/msg/MapLaneGroup.msg b/msgs/perception_msgs/msg/MapLaneGroup.msg
+index 97a38bed5..113e70679 100644
+--- a/msgs/perception_msgs/msg/MapLaneGroup.msg
++++ b/msgs/perception_msgs/msg/MapLaneGroup.msg
+@@ -9,6 +9,7 @@ float32 length
+ geometry_msgs/Point[] left_boundary
+ geometry_msgs/Point[] right_boundary
+ bool is_right_shoulder_undrivable
++bool is_left_shoulder_undrivable
+ int8 functional_class
+ int8 route_type
+ bool is_accessible_by_pedestrians
+diff --git a/msgs/perception_msgs/msg/MapParkingSpotRef.msg b/msgs/perception_msgs/msg/MapParkingSpotRef.msg
+new file mode 100644
+index 000000000..a1ccbc112
+--- /dev/null
++++ b/msgs/perception_msgs/msg/MapParkingSpotRef.msg
+@@ -0,0 +1,2 @@
++string terminal_id
++string id
+diff --git a/msgs/perception_msgs/msg/MapWaypoint.msg b/msgs/perception_msgs/msg/MapWaypoint.msg
+index 5abc58f3f..4778db8f0 100644
+--- a/msgs/perception_msgs/msg/MapWaypoint.msg
++++ b/msgs/perception_msgs/msg/MapWaypoint.msg
+@@ -9,7 +9,12 @@ uint8 WAYPOINT_ROUTE_POINT = 4
+ uint8 WAYPOINT_SUB_DESTINATION = 5
+ uint8 WAYPOINT_SUB_ORIGIN = 6
+ uint8 WAYPOINT_ALLOWED_RAMP = 7
++uint8 WAYPOINT_PARKING_INFLOW = 8
++uint8 WAYPOINT_PARKING_OUTFLOW = 9
++uint8 WAYPOINT_PARKING_SPOT = 10
++uint8 WAYPOINT_STOP_LINE = 11
+ 
+ uint8 waypoint_type
++float64 heading
+ string description
+ string source
+diff --git a/msgs/perception_msgs/msg/Object.msg b/msgs/perception_msgs/msg/Object.msg
+index 888a57e1e..3568cc4e4 100644
+--- a/msgs/perception_msgs/msg/Object.msg
++++ b/msgs/perception_msgs/msg/Object.msg
+@@ -13,6 +13,11 @@ uint8 PEDESTRIAN=6
+ uint8 LARGE_ANIMAL=7
+ uint8 VOS=8
+ uint8 SIGN=9
++uint8 SPEED_LIMIT_SIGN=10
++uint8 CONSTRUCTION_SIGN=11
++uint8 CONSTRUCTION_CONE=12
++uint8 CONSTRUCTION_DELINEATOR=13
++uint8 CONSTRUCTION_BARREL=14
+ 
+ # header for the object
+ # seq and timestamp are the seq and timestamp for the sensor data that this object was detected
+@@ -70,3 +75,31 @@ float64 history
+ 
+ # Temporary flag
+ bool was_observed_by_camera
++
++# Japan Specific ODD
++
++float32 speed_limit_sign_limit_mps # speed limit in meters per sec
++
++
++# Enumeration of Speed Limit Sign types
++uint8 SPEED_LIMIT_SIGN_VEHICLE_UNDEFINED=0
++uint8 SPEED_LIMIT_SIGN_VEHICLE_TRUCK=1
++uint8 SPEED_LIMIT_SIGN_VEHICLE_CAR=2
++
++# speed limit sign type denotes what vehicle type the associated speed is for
++# example: SPEED_LIMIT_SIGN_VEHICLE_TRUCK should be followed by trucks
++uint8 speed_limit_sign_vehicle
++
++# For Japan Specific ODD
++uint8 SPEED_LIMIT_SIGN_TYPE_UNKNOWN=0
++uint8 SPEED_LIMIT_SIGN_TYPE_MAXIMUM=1
++uint8 SPEED_LIMIT_SIGN_TYPE_MINIMUM=2
++
++uint8 speed_limit_sign_type
++
++uint8 SPEED_LIMIT_SIGN_STATUS_UNKNOWN=0
++uint8 SPEED_LIMIT_SIGN_STATUS_START=1
++uint8 SPEED_LIMIT_SIGN_STATUS_END=2
++uint8 SPEED_LIMIT_SIGN_STATUS_CONTINUE=3
++
++uint8 speed_limit_sign_status
+diff --git a/msgs/perception_msgs/msg/PoleDetection.msg b/msgs/perception_msgs/msg/PoleDetection.msg
+index 0d72c7c5e..739fc4228 100644
+--- a/msgs/perception_msgs/msg/PoleDetection.msg
++++ b/msgs/perception_msgs/msg/PoleDetection.msg
+@@ -2,3 +2,7 @@ Header header
+ geometry_msgs/Pose pole_pose
+ float32 radius
+ uint64 pole_id
++
++# WGS84 of associated pole on map
++float64 latitude
++float64 longitude
+diff --git a/msgs/perception_msgs/msg/Scene.msg b/msgs/perception_msgs/msg/Scene.msg
+index 74bedc3f3..d6eb4066e 100644
+--- a/msgs/perception_msgs/msg/Scene.msg
++++ b/msgs/perception_msgs/msg/Scene.msg
+@@ -20,6 +20,7 @@ bool in_teleop_zone
+ bool in_aggressive_steer_zone
+ bool in_high_curvature_zone
+ bool in_shift_zone
++bool in_terminal_area_zone
+ nav_msgs/Odometry odom
+ # Todo(Rohan) Remove Teleop messages from scene
+ teleop_msgs/TeleopOutput teleop_output
+@@ -31,3 +32,4 @@ ShiftSpec shift
+ 
+ # NOTE: PartialScene avoids deserializing map. Add new fields above this point.
+ Map map
++TerminalMap terminal_map
+diff --git a/msgs/perception_msgs/msg/TerminalMap.msg b/msgs/perception_msgs/msg/TerminalMap.msg
+new file mode 100644
+index 000000000..302afdbe1
+--- /dev/null
++++ b/msgs/perception_msgs/msg/TerminalMap.msg
+@@ -0,0 +1,10 @@
++Header header
++
++# frame this map is represented in
++MapFrame map_frame
++
++# Terminal Parking Boundaries
++TerminalParkingSpot[] terminal_parking_spots
++
++# Other Terminal Properties
++string terminal_id
+diff --git a/msgs/perception_msgs/msg/TerminalParkingSpot.msg b/msgs/perception_msgs/msg/TerminalParkingSpot.msg
+new file mode 100644
+index 000000000..524b3ccde
+--- /dev/null
++++ b/msgs/perception_msgs/msg/TerminalParkingSpot.msg
+@@ -0,0 +1,10 @@
++string parking_spot_id
++
++# Geography Properties
++geometry_msgs/Point[] boundary_geometry
++geometry_msgs/Point center_point
++float32 heading
++
++# Inflow/Outflow Properties
++MapLaneGroupRef inflow_ref
++MapLaneGroupRef outflow_ref
+diff --git a/msgs/perception_msgs/msg/TrackedObjectState.msg b/msgs/perception_msgs/msg/TrackedObjectState.msg
+index d36d87267..8f5042685 100644
+--- a/msgs/perception_msgs/msg/TrackedObjectState.msg
++++ b/msgs/perception_msgs/msg/TrackedObjectState.msg
+@@ -19,6 +19,9 @@ uint8 CLASS_UNDEFINED = 0
+ uint8 SMALL_VEHICLE = 1
+ uint8 LARGE_VEHICLE = 2
+ uint8 MOTORCYCLE = 3
++uint8 SPEED_LIMIT_SIGN = 4
++uint8 CONSTRUCTION = 5
++uint8 DEBRIS = 6
+ uint8 class_type
+ 
+ uint8 TYPE_UNDEFINED = 0
+@@ -30,4 +33,4 @@ float64[6] point_mean
+ float64[36] point_covariance
+ 
+ float64[9] box_mean
+-float64[81] box_covariance
+\ No newline at end of file
++float64[81] box_covariance

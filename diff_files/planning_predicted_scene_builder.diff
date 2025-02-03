@@ -1,0 +1,1427 @@
+diff --git a/planning/predicted_scene_builder/BUILD b/planning/predicted_scene_builder/BUILD
+index 6e81c670d..dcd7f6364 100644
+--- a/planning/predicted_scene_builder/BUILD
++++ b/planning/predicted_scene_builder/BUILD
+@@ -9,5 +9,8 @@ cc_library(
+         "//planning/planner_run_test_maps",
+         "//planning/planning_common",
+         "//planning/prediction_engine",
++        "//planning/speed_limit_tracker",
++        "//planning/terminal_map_server",
++        "//planning/terminal_state_machine",
+     ],
+ )
+diff --git a/planning/predicted_scene_builder/CMakeLists.txt b/planning/predicted_scene_builder/CMakeLists.txt
+index 6bd16a09a..1ade99ca0 100644
+--- a/planning/predicted_scene_builder/CMakeLists.txt
++++ b/planning/predicted_scene_builder/CMakeLists.txt
+@@ -20,6 +20,9 @@ set(ROS_COMPONENTS
+   roscpp
+   roslib
+   std_msgs
++  speed_limit_tracker
++  terminal_map_server
++  terminal_state_machine
+   utils
+   utils_sets
+   utils_constants
+@@ -43,7 +46,6 @@ add_library(predicted_scene_builder
+   src/frenet_frame_builder.cpp
+   src/planner_run_build_scene.cpp
+   src/vos_filter.cpp
+-  src/reference_line_utils.cpp
+   src/object_preprocessing.cpp
+   )
+ 
+diff --git a/planning/predicted_scene_builder/benchmark/legacy/frenet_frame_builder.cpp b/planning/predicted_scene_builder/benchmark/legacy/frenet_frame_builder.cpp
+index 94b251830..3ba51e56d 100644
+--- a/planning/predicted_scene_builder/benchmark/legacy/frenet_frame_builder.cpp
++++ b/planning/predicted_scene_builder/benchmark/legacy/frenet_frame_builder.cpp
+@@ -38,7 +38,7 @@ getLaneRefsPerPosition(const lane_map::LaneRef& ego_lane_ref, const maps::LaneSu
+   const lane_map::LaneGroup* ego_lane_group = lane_map_utils::getLaneGroup(ego_lane_ref, map);
+   assert(ego_lane_group != nullptr);
+ 
+-  std::vector<lane_map::LaneRef> lanes_in_order = lane_map_utils::getLaneRefsInOrder(*ego_lane_group);
++  std::vector<lane_map::LaneRef> lanes_in_order = lane_map_utils::getLaneRefsLeftToRight(*ego_lane_group);
+ 
+   auto ego_lane_position = std::find(lanes_in_order.begin(), lanes_in_order.end(), ego_lane_ref);
+   assert(ego_lane_position != lanes_in_order.end());
+@@ -251,4 +251,4 @@ FrenetGraph FrenetFrameBuilder::generateGraphFromIDs(const Mappery& map_graph,
+ }
+ 
+ } // namespace legacy
+-} // namespace planning
+\ No newline at end of file
++} // namespace planning
+diff --git a/planning/predicted_scene_builder/benchmark/legacy/frenet_frame_builder.h b/planning/predicted_scene_builder/benchmark/legacy/frenet_frame_builder.h
+index f56d59e65..b17e13ef8 100644
+--- a/planning/predicted_scene_builder/benchmark/legacy/frenet_frame_builder.h
++++ b/planning/predicted_scene_builder/benchmark/legacy/frenet_frame_builder.h
+@@ -98,4 +98,4 @@ class FrenetFrameBuilder
+ } // namespace planning
+ 
+ 
+-#endif // PLANNING_PREDICTION_FRENET_FRAME_BUILDER_H_
+\ No newline at end of file
++#endif // PLANNING_PREDICTION_FRENET_FRAME_BUILDER_H_
+diff --git a/planning/predicted_scene_builder/benchmark/legacy/frenet_graph.cpp b/planning/predicted_scene_builder/benchmark/legacy/frenet_graph.cpp
+index baa8cb7ae..9a586c610 100644
+--- a/planning/predicted_scene_builder/benchmark/legacy/frenet_graph.cpp
++++ b/planning/predicted_scene_builder/benchmark/legacy/frenet_graph.cpp
+@@ -39,4 +39,4 @@ void FrenetGraph::addNode(FrenetNode node)
+ }
+ 
+ } // namespace legacy
+-} // namespace planning
+\ No newline at end of file
++} // namespace planning
+diff --git a/planning/predicted_scene_builder/benchmark/legacy/frenet_graph.h b/planning/predicted_scene_builder/benchmark/legacy/frenet_graph.h
+index b414cec40..ffe9d47ec 100644
+--- a/planning/predicted_scene_builder/benchmark/legacy/frenet_graph.h
++++ b/planning/predicted_scene_builder/benchmark/legacy/frenet_graph.h
+@@ -88,4 +88,4 @@ class FrenetGraph
+ } // namespace legacy
+ } // namespace planning
+ 
+-#endif
+\ No newline at end of file
++#endif
+diff --git a/planning/predicted_scene_builder/deploy/deploy_lane_association.sh b/planning/predicted_scene_builder/deploy/deploy_lane_association.sh
+index f1650e342..ad4ba5ccd 100755
+--- a/planning/predicted_scene_builder/deploy/deploy_lane_association.sh
++++ b/planning/predicted_scene_builder/deploy/deploy_lane_association.sh
+@@ -4,7 +4,7 @@
+ set -x
+ set -e
+ 
+-SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
++SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ LANE_ASSOCIATION_DIR="$SCRIPT_DIR"
+ 
+ gemfury_push_token=$(aws secretsmanager get-secret-value --secret-id GemfuryPushToken-Production --region us-west-2 --query SecretString)
+@@ -16,11 +16,11 @@ mkdir dist
+ 
+ # Copy wheel
+ cp /home/embark/catkin_ws/build/predicted_scene_builder/py_bindings/whl/dist/*.whl dist/
+-the_wheel=$(basename `ls -1 dist/*.whl`)
++the_wheel=$(basename $(ls -1 dist/*.whl))
+ 
+ if [ ! -f ${LANE_ASSOCIATION_DIR}/dist/$the_wheel ]; then
+-  echo "Unable to find wheel file to deploy."
+-  exit 1
++	echo "Unable to find wheel file to deploy."
++	exit 1
+ fi
+ 
+ # The wheel file should look like:  <package_name>-<version>.<datestamp>.<timestamp>.whl
+@@ -38,15 +38,15 @@ curl_exit_code=$?
+ 
+ # Handle errors
+ if [ $curl_exit_code -eq 0 ]; then
+-  if [ $curl_http_code -eq 200 ]; then
+-    echo "${the_new_wheel} deployed to push.fury.io/embark/"
+-  else
+-    echo "Failed to deploy:  $curl_out"
+-    exit 1
+-  fi
++	if [ $curl_http_code -eq 200 ]; then
++		echo "${the_new_wheel} deployed to push.fury.io/embark/"
++	else
++		echo "Failed to deploy:  $curl_out"
++		exit 1
++	fi
+ else
+-  echo "Failed to deploy"
+-  exit $curl_exit_code
++	echo "Failed to deploy"
++	exit $curl_exit_code
+ fi
+ 
+ rm -f dist
+diff --git a/planning/predicted_scene_builder/example/lane_association_py_example.py b/planning/predicted_scene_builder/example/lane_association_py_example.py
+index 8ff20574a..3a7cc6b26 100644
+--- a/planning/predicted_scene_builder/example/lane_association_py_example.py
++++ b/planning/predicted_scene_builder/example/lane_association_py_example.py
+@@ -8,14 +8,14 @@ import lane_association_py as lap
+ 
+ 
+ def to_cpp(msg):
+-    '''Serialize ros msg to string buffer that can be consumed in cpp'''
++    """Serialize ros msg to string buffer that can be consumed in cpp"""
+     buf = io.BytesIO()
+     msg.serialize(buf)
+     return buf.getvalue()
+ 
+ 
+ def read_from_bag(bag_files_glob):
+-    '''Load vehicle and lane data from /perception/scene topic'''
++    """Load vehicle and lane data from /perception/scene topic"""
+     scene_list = []
+     try:
+         # open bag files
+@@ -24,9 +24,9 @@ def read_from_bag(bag_files_glob):
+ 
+         # iterate through bag files
+         for bag_file in bag_files:
+-            bag = rosbag.Bag(bag_file, 'r')
++            bag = rosbag.Bag(bag_file, "r")
+ 
+-            for topic, msg, t in bag.read_messages('/perception/scene'):
++            for topic, msg, t in bag.read_messages("/perception/scene"):
+                 # extract object ID, pose, and dimensions for each object
+                 objects = []
+                 for obj in msg.objects:
+@@ -49,15 +49,15 @@ def read_from_bag(bag_files_glob):
+         return scene_list
+ 
+     except Exception as e:
+-        print('Failed to read bag(s): {}'.format(e))
++        print("Failed to read bag(s): {}".format(e))
+         return
+ 
+ 
+ def get_associations(scene_list, params):
+-    '''
++    """
+     Perform lane association
+     Returns dictionary of timestamps and associations
+-    '''
++    """
+     result = []
+     association_data_list = lap.get_associations(scene_list, params)
+ 
+@@ -87,10 +87,12 @@ def set_params(obj_corner_dist_thresh, use_corners, max_heading_delta):
+     return params
+ 
+ 
+-if __name__ == '__main__':
++if __name__ == "__main__":
+     # parse command line argument for bag file
+-    parser = argparse.ArgumentParser(description='return lane associations for bag data')
+-    parser.add_argument('bag_file', help='glob to specify bag file(s)')
++    parser = argparse.ArgumentParser(
++        description="return lane associations for bag data"
++    )
++    parser.add_argument("bag_file", help="glob to specify bag file(s)")
+     ARGS = parser.parse_args()
+ 
+     # read data from bag and get associations
+diff --git a/planning/predicted_scene_builder/include/predicted_scene_builder/predicted_scene_builder.h b/planning/predicted_scene_builder/include/predicted_scene_builder/predicted_scene_builder.h
+index e6ddfcb14..f0403ee25 100644
+--- a/planning/predicted_scene_builder/include/predicted_scene_builder/predicted_scene_builder.h
++++ b/planning/predicted_scene_builder/include/predicted_scene_builder/predicted_scene_builder.h
+@@ -10,6 +10,9 @@
+ #include <planning_common/types/predicted_object.h>
+ #include <planning_common/types/predicted_scene.h>
+ #include <prediction_engine/prediction_engine.h>
++#include <speed_limit_tracker/speed_limit_tracker.h>
++#include <terminal_state_machine/terminal_state_machine.h>
++#include <terminal_stop_go_state_machine/terminal_stop_go_state_machine.h>
+ 
+ #include <vector>
+ 
+@@ -47,16 +50,20 @@ class PredictedSceneBuilder
+ 
+   /**
+    * @brief Build the predicted scene
+-   * @param scene_msg                   Perception scene (objects, ego state, etc.)
+-   * @param map                         Mappery (lane graph & geometry)
+-   * @param lane_id_tracker             Object responsible for keeping lane IDs consistent frame-to-frame
+-   * @param options                     Config for building the scene
+-   * @return                            A fully constructed PredictedScene
++   * @param scene_msg                      Perception scene (objects, ego state, etc.)
++   * @param map                            Mappery (lane graph & geometry)
++   * @param lane_id_tracker                Object responsible for keeping lane IDs consistent frame-to-frame
++   * @param terminal_state_machine         State machine that determines if terminal planning should be active
++   * @param terminal_stop_go_state_machine State machine that determines if ego should stop or go at terminal stop lines
++   * @param options                        Config for building the scene
++   * @return                               A fully constructed PredictedScene
+    */
+-  std::unique_ptr<planning::PredictedScene> buildPredictedScene(const perception_msgs::Scene& scene_msg,
+-                                                                std::unique_ptr<const Mappery>&& map,
+-                                                                const LaneIDTracker& lane_id_tracker,
+-                                                                SceneOptions options = SceneOptions());
++  std::unique_ptr<planning::PredictedScene>
++  buildPredictedScene(const perception_msgs::Scene& scene_msg, std::unique_ptr<const Mappery>&& map,
++                      const LaneIDTracker& lane_id_tracker, SpeedLimitTracker& speed_limit_tracker,
++                      const terminal_sm::TerminalStateMachine& terminal_state_machine,
++                      const terminal_stop_go_sm::TerminalStopGoStateMachine& terminal_stop_go_state_machine,
++                      SceneOptions options = SceneOptions());
+ 
+   /**
+    * Check if any objects are overlapping with each other in Cartesian coordinates or in Frenet coordinates. Only check
+diff --git a/planning/predicted_scene_builder/include/predicted_scene_builder/reference_line_utils.h b/planning/predicted_scene_builder/include/predicted_scene_builder/reference_line_utils.h
+deleted file mode 100644
+index 2939b9d80..000000000
+--- a/planning/predicted_scene_builder/include/predicted_scene_builder/reference_line_utils.h
++++ /dev/null
+@@ -1,106 +0,0 @@
+-#ifndef PLANNER_COMMON_REFERENCE_LINE_UTILS_H_
+-#define PLANNER_COMMON_REFERENCE_LINE_UTILS_H_
+-
+-#include "planning_common/types/planning_parameters.h"
+-#include "planning_common/types/planning_types.h"
+-#include "planning_common/types/predicted_scene.h"
+-#include "planning_common/types/reference_line.h"
+-
+-namespace planning {
+-
+-class ReferenceLineUtils
+-{
+- public:
+-  /**
+-   *@brief Generate reference lines from lane IDs.
+-   *
+-   * @param params                     planner parameters
+-   * @param frenet_graph
+-   * @param ego_object
+-   * @param lane_graph
+-   * @param lane_id_tracker
+-   * @param is_telop_active
+-   * @param limit_reference_lines      if true, only produce ego,left,left-left,right-right and merge, if false produce
+-   *for all.
+-   * @return ReferenceLines object or std::nullopt if generation failed.
+-   */
+-  static std::optional<ReferenceLines> generateReferenceLines(const PlannerParameters& params,
+-                                                              const FrenetGraph& frenet_graph,
+-                                                              const EgoObject& ego_object, const Mappery& lane_graph,
+-                                                              const LaneIDTracker& lane_id_tracker,
+-                                                              bool is_teleop_active, bool limit_reference_lines);
+-  /**
+-   * @brief Given a coarsely sampled polyline path, this function super samples the path with a
+-   * discretization of dS meters and generates a Reference line data structrue around the path. If
+-   * the rear_connect_point is set the last point in the reference line will connect perfectly to
+-   * this point and the arclength of the other point will be calculated based on the arclength in
+-   * the connect point.
+-   * @param path                   coarsly sampled path
+-   * @param new_id                 id of the reference line to be generated
+-   * @param dS                     sample discretization
+-   * @param rear_connect_point     an optional connection point in at the rear of the reference line
+-   * @return                       a reference line data structure, or std::nullopt if generation failed.
+-   */
+-  static std::optional<ReferenceLine> generatePolylineReferenceLine(const std::vector<CurvePoint>& path, LaneID new_id,
+-                                                                    double dS,
+-                                                                    const ReferencePoint* rear_connect_point = nullptr);
+-
+-  /**
+-   * @brief Generate reference line from Bspline and set the ID for it.
+-   *
+-   * @param lane_id            Super lane id vector for a lane.
+-   * @param map
+-   */
+-  static std::vector<geometry_msgs::Point> generateGeometryLanePath(LaneID lane_id, const maps::LaneSubMap& map,
+-                                                                    const LaneIDTracker& id_tracker);
+-
+-  /**
+-   * @brief Generate reference line from Bspline and set the ID for it.
+-   *
+-   * @param[in] lane_path_geometry         Lane path consists of geometry points.
+-   * @param[in] params                     planner parameters
+-   */
+-  static std::vector<CurvePoint> generateCurvedPointLanePath(
+-      const std::vector<geometry_msgs::Point>& lane_path_geometry, const PlannerParameters& params);
+-
+-  /**
+-   * @brief This function generates a spline based reference line for the given lane id. It
+-   * generates a spline for the interval specifed in the parameters and after that it generates a
+-   * non smoothed polyline along the path to save computation.
+-   * @param init_lane_id            lane id for which to generate the reference line
+-   * @param params                  generation parameters
+-   * @param frenet_graph
+-   * @param map
+-   * @return                        a spline based reference line, or std::nullopt if we failed to build one.
+-   */
+-  static std::optional<ReferenceLine> buildSplineReferenceLineFromLaneID(
+-      LaneID init_lane_id, const PlannerParameters& params, const FrenetGraph& frenet_graph,
+-      const maps::LaneSubMap& map, const LaneIDTracker& id_tracker, bool is_teleop_active);
+-  /**
+-   * @brief This function generates a polyline based reference line for the given lane id.
+-   * @param init_lane_id            lane id for which to generate the reference line
+-   * @param params                  generation parameters
+-   * @param frenet_graph
+-   * @param map
+-   * @param connect_point (optional)
+-   * @return                        a polyline reference line, or std::nullopt if we failed to build one.
+-   */
+-  static std::optional<ReferenceLine> buildPolylineReferenceLineFromLaneID(
+-      LaneID init_lane_id, const PlannerParameters& params, const FrenetGraph& frenet_graph,
+-      const maps::LaneSubMap& map, const ReferencePoint* connect_point, const LaneIDTracker& id_tracker);
+-
+-  /**
+-   * @brief Add free space path to reference lines.
+-   * @param add_lane_id             lane id for newly added path to reference lines
+-   * @param path                    path to be added
+-   * @param params                  generation parameters
+-   * @param reference_lines         existing reference path, the new path will be added to this
+-   * @return                        false if generation failed
+-   */
+-  static bool addPathToReferenceLines(
+-    const LaneID& add_lane_id, const std::vector<geometry_msgs::Point>& path,
+-    const PlannerParameters& params, ReferenceLines& reference_lines);
+-};
+-} // namespace planning
+-
+-#endif // PLANNER_COMMON_REFERENCE_LINE_UTILS_H_
+diff --git a/planning/predicted_scene_builder/include/predicted_scene_builder/vos_filter.h b/planning/predicted_scene_builder/include/predicted_scene_builder/vos_filter.h
+index e5f3cb8e1..cf71bb8a7 100644
+--- a/planning/predicted_scene_builder/include/predicted_scene_builder/vos_filter.h
++++ b/planning/predicted_scene_builder/include/predicted_scene_builder/vos_filter.h
+@@ -23,4 +23,4 @@ class VosFilter
+   VosFilterParams params_;
+ };
+ 
+-} // namespace planning
+\ No newline at end of file
++} // namespace planning
+diff --git a/planning/predicted_scene_builder/package.xml b/planning/predicted_scene_builder/package.xml
+index ed0d56b36..85141a6ea 100644
+--- a/planning/predicted_scene_builder/package.xml
++++ b/planning/predicted_scene_builder/package.xml
+@@ -1,35 +1,32 @@
+ <?xml version="1.0"?>
+ <package format="2">
+-  <name>predicted_scene_builder</name>
+-  <version>0.0.0</version>
+-  <description>predicted_scene_builder</description>
+-
+-  <!-- One maintainer tag required, multiple allowed, one person per tag -->
+-  <!-- Example:  -->
+-  <!-- <maintainer email="jane.doe@example.com">Jane Doe</maintainer> -->
+-  <maintainer email="niclas@embarktrucks.com">Niclas Evestedt</maintainer>
+-
+-
+-  <!-- One license tag required, multiple allowed, one license per tag -->
+-  <!-- Commonly used license strings: -->
+-  <!--   BSD, MIT, Boost Software License, GPLv2, GPLv3, LGPLv2.1, LGPLv3 -->
+-  <license>TODO</license>
+-
+-  <buildtool_depend>catkin</buildtool_depend>
+-  <depend>rospy</depend>
+-  <depend>roscpp</depend>
+-  <depend>roslib</depend>
+-  <depend>utils</depend>
+-  <depend>utils_sets</depend>
+-  <depend>utils_constants</depend>
+-  <depend>std_msgs</depend>
+-  <depend>motion_history</depend>
+-  <depend>planning_common</depend>
+-  <depend>planner_run_test_maps</depend>
+-  <depend>diagnostics_utils</depend>
+-  <depend>maps</depend>
+-  <depend>prediction_engine</depend>
+-  <depend>lane_id_tracker</depend>
+-
+-
++    <name>predicted_scene_builder</name>
++    <version>0.0.0</version>
++    <description>predicted_scene_builder</description>
++    <!-- One maintainer tag required, multiple allowed, one person per tag -->
++    <!-- Example:  -->
++    <!-- <maintainer email="jane.doe@example.com">Jane Doe</maintainer> -->
++    <maintainer email="niclas@embarktrucks.com">Niclas Evestedt</maintainer>
++    <!-- One license tag required, multiple allowed, one license per tag -->
++    <!-- Commonly used license strings: -->
++    <!--   BSD, MIT, Boost Software License, GPLv2, GPLv3, LGPLv2.1, LGPLv3 -->
++    <license>TODO</license>
++    <buildtool_depend>catkin</buildtool_depend>
++    <depend>rospy</depend>
++    <depend>roscpp</depend>
++    <depend>roslib</depend>
++    <depend>utils</depend>
++    <depend>utils_sets</depend>
++    <depend>utils_constants</depend>
++    <depend>std_msgs</depend>
++    <depend>motion_history</depend>
++    <depend>planning_common</depend>
++    <depend>planner_run_test_maps</depend>
++    <depend>diagnostics_utils</depend>
++    <depend>maps</depend>
++    <depend>prediction_engine</depend>
++    <depend>lane_id_tracker</depend>
++    <depend>speed_limit_tracker</depend>
++    <depend>terminal_map_server</depend>
++    <depend>terminal_state_machine</depend>
+ </package>
+diff --git a/planning/predicted_scene_builder/py_bindings/setup.py b/planning/predicted_scene_builder/py_bindings/setup.py
+index 3a3f2a981..56c44b6e0 100644
+--- a/planning/predicted_scene_builder/py_bindings/setup.py
++++ b/planning/predicted_scene_builder/py_bindings/setup.py
+@@ -1,6 +1,7 @@
+ from setuptools import setup, Distribution
+ from setuptools.command.install import install as InstallCommandBase
+ 
++
+ class BinaryDistribution(Distribution):
+     def has_ext_modules(self):
+         return True
+@@ -19,23 +20,19 @@ Functions for association of objects to superlanes and lanes by checking overlap
+ """
+ 
+ setup(
+-    name='lane_association_py',
+-    packages=['lane_association_py'],
+-    version='1.0',
+-    license='EMBARK',
+-    description='lane association',
++    name="lane_association_py",
++    packages=["lane_association_py"],
++    version="1.0",
++    license="EMBARK",
++    description="lane association",
+     long_description=long_description,
+-    long_description_content_type='text/x-rst',
+-    author='',
+-    author_email='',
++    long_description_content_type="text/x-rst",
++    author="",
++    author_email="",
+     distclass=BinaryDistribution,
+     include_package_data=True,
+-    package_data={
+-        'lane_association_py': ['*.so',
+-                                '*.so.*'
+-                               ]
+-    },
++    package_data={"lane_association_py": ["*.so", "*.so.*"]},
+     cmdclass={
+-        'install': InstallCommand,
++        "install": InstallCommand,
+     },
+ )
+diff --git a/planning/predicted_scene_builder/src/planner_run_build_scene.cpp b/planning/predicted_scene_builder/src/planner_run_build_scene.cpp
+index 184b9355c..4b74dc96f 100644
+--- a/planning/predicted_scene_builder/src/planner_run_build_scene.cpp
++++ b/planning/predicted_scene_builder/src/planner_run_build_scene.cpp
+@@ -7,7 +7,13 @@ namespace run_test {
+ void PlannerRunBuildScene::buildScene()
+ {
+   scene_builder_ = std::make_shared<PredictedSceneBuilder>();
+-  scene_ = scene_builder_->buildPredictedScene(scene_msg_, std::move(mappery_), lane_id_tracker_);
++  SpeedLimitTracker speed_limit_tracker;
++  auto terminal_state_machine =
++      terminal_sm::TerminalStateMachine(std::vector<terminal_sm::Waypoint>{}, terminal_sm::TerminalState{});
++  auto terminal_stop_go_state_machine = terminal_stop_go_sm::TerminalStopGoStateMachine(
++      std::vector<terminal_stop_go_sm::Waypoint>{}, terminal_stop_go_sm::TerminalState{});
++  scene_ = scene_builder_->buildPredictedScene(scene_msg_, std::move(mappery_), lane_id_tracker_, speed_limit_tracker,
++                                               terminal_state_machine, terminal_stop_go_state_machine);
+ }
+ 
+ } // namespace run_test
+diff --git a/planning/predicted_scene_builder/src/predicted_scene_builder.cpp b/planning/predicted_scene_builder/src/predicted_scene_builder.cpp
+index efb95063f..2e34edbde 100644
+--- a/planning/predicted_scene_builder/src/predicted_scene_builder.cpp
++++ b/planning/predicted_scene_builder/src/predicted_scene_builder.cpp
+@@ -6,6 +6,7 @@
+ #include <tf/transform_datatypes.h>
+ #endif
+ 
++#include <geometry_msgs/Point32.h>
+ #include <utils/constants/constants.h>
+ #include <utils/ros/msgs_utils.h>
+ 
+@@ -22,11 +23,12 @@
+ #include "planning_common/math/planning_math.h"
+ #include "planning_common/utils/distance_checker.h"
+ #include "planning_common/utils/frenet_utils.h"
++#include "planning_common/utils/reference_line_utils.h"
+ #include "planning_common/utils/scene_utils.h"
+ #include "predicted_scene_builder/lane_association.h"
+ #include "predicted_scene_builder/object_preprocessing.h"
+-#include "predicted_scene_builder/reference_line_utils.h"
+ #include "predicted_scene_builder/vos_filter.h"
++#include "terminal_map_server/terminal_mappery/terminal_mappery.h"
+ #include "utils/geometric/utils.h"
+ #include "utils/map/utils.h"
+ #include "utils/math/poly.h"
+@@ -42,26 +44,96 @@ constexpr double MIN_DIST_FOR_OBJ_EGO_OVERLAP = 0.1;
+ constexpr double MIN_DIST_FOR_OBJ_OBJ_OVERLAP = 0.1;
+ // The distance between ego's center and an object's center under which we should check if there is an overlap (meters)
+ constexpr double DISTANCE_TO_CONSIDER_OBJ_OVERLAP = 25.0;
++// Threshold for the time (seconds) it takes for ego to reach next stop line
++constexpr double STOP_LINE_TIME_THRESHOLD = 6.0;
++// Threshold for the distance (meters) to the next stop line
++constexpr double STOP_LINE_DISTANCE_THRESHOLD = 20.0;
+ 
+ double normalizeSToCenter(double s, const PredictedObject& obj)
+ {
+   return s - obj.getBB().a2() + obj.getBB().length() / 2.;
+ }
+ 
+-/// Returns the desired speed limit as specified in the map. This is could be different from the posted speed limit.
+-/// Converts the speed to meters per second, from mph in the map, before returning
+-std::optional<double> desiredSpeedFromMap(const Mappery& map)
++using StaticObjectBoundaries = std::unordered_map<ObjectID, std::pair<Eigen::Vector2d, perception_msgs::HullInfo>>;
++StaticObjectBoundaries getStaticObjectBoundaries(const std::unordered_map<ObjectID, PredictedObject>& predicted_objects)
+ {
+-  const lane_map::LaneRef* ego_lr = map.getEgoLaneRef();
+-  if (ego_lr == nullptr)
+-    return std::nullopt;
+-  const lane_map::LaneGroup* ego_lg = map.getMap().getLaneGroup(ego_lr->getLaneGroupRef());
+-  if (ego_lg == nullptr)
+-    return std::nullopt;
+-  if (ego_lg->desired_speed_mph <= 0.0) {
+-    return std::nullopt;
++  StaticObjectBoundaries static_obstacle_boundaries;
++  for (const auto& [obj_id, pred_obj] : predicted_objects) {
++    if (pred_obj.isObjectStatic()) {
++      Eigen::Vector2d centerpoint(pred_obj.getCartesianState().x, pred_obj.getCartesianState().y);
++      static_obstacle_boundaries[obj_id] = std::make_pair(centerpoint, pred_obj.getConvexHull());
++    }
+   }
+-  return ego_lg->desired_speed_mph * ::constants::MPH_TO_M_S;
++  return static_obstacle_boundaries;
++}
++
++perception_msgs::Object convertStopLineToSceneObject(const perception_msgs::MapWaypoint& waypoint,
++                                                     const perception_msgs::EgoState& ego_state)
++{
++  Eigen::Vector2d ego_utm;
++  map_utils::UtmZone zone = map_utils::getUtmZone(ego_state.latitude, ego_state.longitude);
++  map_utils::convertGpsToUtm(ego_state.latitude, ego_state.longitude, zone, &ego_utm[0], &ego_utm[1]);
++  double ego_utm_theta = map_utils::getUtmTheta(zone, ego_state.heading, ego_state.latitude, ego_state.longitude);
++
++  Eigen::Vector2d waypoint_utm;
++  map_utils::convertGpsToUtm(waypoint.gps_position.latitude, waypoint.gps_position.longitude, zone, &waypoint_utm[0],
++                             &waypoint_utm[1]);
++
++  Eigen::Vector2d waypoint_utm_ego_frame;
++  waypoint_utm_ego_frame[0] = (waypoint_utm[0] - ego_utm[0]) * std::cos(ego_utm_theta) +
++                              (waypoint_utm[1] - ego_utm[1]) * std::sin(ego_utm_theta);
++  waypoint_utm_ego_frame[1] = -(waypoint_utm[0] - ego_utm[0]) * std::sin(ego_utm_theta) +
++                              (waypoint_utm[1] - ego_utm[1]) * std::cos(ego_utm_theta);
++
++  perception_msgs::Object object;
++  object.header = ego_state.header;
++  object.id = waypoint.id + 10000; // Add 10000 to avoid collision with other object ids
++  object.type = perception_msgs::Object::CAR;
++  object.confidence = 1.0;
++
++  object.dimensions.x = 1.0;
++  object.dimensions.y = 5.0;
++  object.dimensions.z = 2.0;
++
++  geometry_msgs::Point32 hull_point1;
++  hull_point1.x = waypoint_utm_ego_frame[0] - 0.5;
++  hull_point1.y = waypoint_utm_ego_frame[1] - 2.5;
++  geometry_msgs::Point32 hull_point2;
++  hull_point2.x = waypoint_utm_ego_frame[0] + 0.5;
++  hull_point2.y = waypoint_utm_ego_frame[1] - 2.5;
++  geometry_msgs::Point32 hull_point3;
++  hull_point3.x = waypoint_utm_ego_frame[0] + 0.5;
++  hull_point3.y = waypoint_utm_ego_frame[1] + 2.5;
++  geometry_msgs::Point32 hull_point4;
++  hull_point4.x = waypoint_utm_ego_frame[0] - 0.5;
++  hull_point4.y = waypoint_utm_ego_frame[1] + 2.5;
++  object.convex_hull.hull_points.push_back(hull_point1);
++  object.convex_hull.hull_points.push_back(hull_point2);
++  object.convex_hull.hull_points.push_back(hull_point3);
++  object.convex_hull.hull_points.push_back(hull_point4);
++  object.convex_hull.height = 2.0;
++
++  object.pose.pose.position.x = waypoint_utm_ego_frame[0];
++  object.pose.pose.position.y = waypoint_utm_ego_frame[1];
++  object.pose.pose.position.z = 0.0;
++  object.pose.pose.orientation.x = 0.0;
++  object.pose.pose.orientation.y = 0.0;
++  object.pose.pose.orientation.z = 0.0;
++  object.pose.pose.orientation.w = 1.0;                             // Facing towards ego frame x-axis
++
++  object.velocity.twist.linear.x = -1 * ego_state.speed;            // Velocity relative to ego
++  object.acceleration.twist.linear.x = -1 * ego_state.acceleration; // Acceleration relative to ego
++
++  object.measurement_covariance_multiplier_position_x = 1.0;
++  object.measurement_covariance_multiplier_position_y = 1.0;
++  object.measurement_covariance_multiplier_velocity_x = 1.0;
++  object.measurement_covariance_multiplier_velocity_y = 1.0;
++
++  object.blinker_state = perception_msgs::Object::BLINKER_OFF;
++  object.history = 0.0;
++  object.was_observed_by_camera = false;
++
++  return object;
+ }
+ 
+ } // namespace
+@@ -173,11 +245,11 @@ std::optional<std::string> PredictedSceneBuilder::objectsOverlappingDiagnostic(
+   relevant_objects.reserve(num_relevant_objects);
+ 
+   for (size_t i = 0; i < objects.size(); ++i) {
+-    #ifdef BAZEL
++#ifdef BAZEL
+     const double yaw = tf2::getYaw(objects[i].pose.pose.orientation);
+-    #else
++#else
+     const double yaw = tf::getYaw(objects[i].pose.pose.orientation);
+-    #endif
++#endif
+     if (relevant_object_ids.count(static_cast<ObjectID>(objects[i].id)) > 0) {
+       obbs.emplace_back(objects[i].pose.pose.position, yaw, objects[i].dimensions.y, objects[i].dimensions.x);
+       relevant_objects.push_back(objects[i]);
+@@ -228,7 +300,8 @@ void PredictedSceneBuilder::setParams(const PlannerParameters& params)
+ 
+ std::unique_ptr<planning::PredictedScene> PredictedSceneBuilder::buildPredictedScene(
+     const perception_msgs::Scene& scene_msg, std::unique_ptr<const Mappery>&& map, const LaneIDTracker& lane_id_tracker,
+-    SceneOptions options)
++    SpeedLimitTracker& speed_limit_tracker, const terminal_sm::TerminalStateMachine& terminal_state_machine,
++    const terminal_stop_go_sm::TerminalStopGoStateMachine& terminal_stop_go_state_machine, SceneOptions options)
+ {
+   diagnostics_utils::SequentialExecution exec_timing;
+   exec_timing.trace();
+@@ -271,31 +344,22 @@ std::unique_ptr<planning::PredictedScene> PredictedSceneBuilder::buildPredictedS
+   // setup transform from odom to vehicle frame
+   auto vehicle_odom_T = Eigen::Translation3d(scene_msg.odom.pose.pose.position.x, scene_msg.odom.pose.pose.position.y,
+                                              scene_msg.odom.pose.pose.position.z) *
+-                        #ifdef BAZEL
++#ifdef BAZEL
+                         Eigen::AngleAxisd(tf2::getYaw(scene_msg.odom.pose.pose.orientation), Eigen::Vector3d::UnitZ());
+-                        #else
++#else
+                         Eigen::AngleAxisd(tf::getYaw(scene_msg.odom.pose.pose.orientation), Eigen::Vector3d::UnitZ());
+-                        #endif
++#endif
+ 
+   motion_history::MotionHistory motion_history(scene_msg.motion_history);
+ 
++  const int terminal_planning_state = terminal_state_machine.CurrentStateID();
++
+   exec_timing.start("validateMap", CALLER_INFO());
+   if (!isMapValid(*map)) {
+     ROS_WARN_THROTTLE(1, "Planner got invalid map!");
+     return nullptr;
+   }
+ 
+-  // get the desired speed limit, returns in meters per second
+-  std::optional<double> map_desired_speed = desiredSpeedFromMap(*map);
+-  const bool is_user_override = scene_msg.route_velocity.source == planning_msgs::VelocityRequest::USER_CONTROL ||
+-                                scene_msg.route_velocity.source == planning_msgs::VelocityRequest::OPERATOR_INTERFACE;
+-  const bool use_velocity_request = !map_desired_speed.has_value() || is_user_override ||
+-                                    scene_msg.route_velocity.source == planning_msgs::VelocityRequest::SCENE_SIMULATOR;
+-  const double desired_speed_value = use_velocity_request ? scene_msg.route_velocity.desired_velocity :
+-                                                            *map_desired_speed + options.desired_speed_above_road_limit;
+-  const PredictedScene::DesiredSpeedLimit desired_speed_limit{ .value = desired_speed_value,
+-                                                               .is_user_override = is_user_override };
+-
+   // construct global lane id system for predicted scene.
+   exec_timing.start("buildLaneIDSystem", CALLER_INFO());
+   auto frenet_graph = FrenetFrameBuilder::buildGraph(*map, lane_id_tracker);
+@@ -320,14 +384,48 @@ std::unique_ptr<planning::PredictedScene> PredictedSceneBuilder::buildPredictedS
+   std::unordered_map<ObjectID, PredictedObject> predicted_objects;
+   // Temporary data structure to help reduce false positive VOS detections.
+   std::unordered_map<ObjectID, bool> objects_observed_by_camera;
++  // Check for any Construction or Debris Objects in Scene
++  bool out_of_odd_obj_detected = false;
+ 
+   for (const perception_msgs::Object& object : scene_msg.objects) {
+     // use emplace to avoid a copy. extra syntax for explicit constructor
+     const auto id = static_cast<ObjectID>(object.id);
+-    predicted_objects.emplace(id, PredictedObject(object, ego_object.getCartesianState(), ego_object.getYawRate()));
++    PredictedObject predicted_obj(object, ego_object.getCartesianState(), ego_object.getYawRate());
++
++    // TODO (@ishaan): Add other out of odd objects here
++    if (predicted_obj.getType() == ObjectType::DEBRIS) {
++      out_of_odd_obj_detected = true;
++    }
++
++    predicted_objects.emplace(id, std::move(predicted_obj));
+     objects_observed_by_camera.emplace(id, object.was_observed_by_camera);
+   }
+ 
++  const PredictedScene::DesiredSpeedLimit desired_speed_limit = speed_limit_tracker.getDesiredSpeedLimit(
++      scene_msg, *map, predicted_objects, ego_object, terminal_state_machine, options.desired_speed_above_road_limit,
++      planner_params_.speed_limiter.terminal_parking_speed_limit);
++
++  // Create stop line predicted object for ego to stop at
++  for (const perception_msgs::MapWaypoint& waypoint : scene_msg.route.waypoints) {
++    if (waypoint.waypoint_type == perception_msgs::MapWaypoint::WAYPOINT_STOP_LINE &&
++        waypoint.id == terminal_stop_go_state_machine.CurrentWaypointId()) {
++      // Find the current stop line waypoint
++      perception_msgs::Object object = convertStopLineToSceneObject(waypoint, scene_msg.ego_state);
++
++      // Only add stop line object if it's close enough to ego
++      double distance_to_stop_line =
++          std::sqrt(std::pow(object.pose.pose.position.x, 2) + std::pow(object.pose.pose.position.y, 2));
++      double time_to_reach_stop_line = distance_to_stop_line / scene_msg.ego_state.speed;
++      if (time_to_reach_stop_line > STOP_LINE_TIME_THRESHOLD && distance_to_stop_line > STOP_LINE_DISTANCE_THRESHOLD) {
++        continue;
++      }
++
++      PredictedObject predicted_obj(object, ego_object.getCartesianState(), ego_object.getYawRate());
++      predicted_objects.emplace(predicted_obj.id(), std::move(predicted_obj));
++      objects_observed_by_camera.emplace(predicted_obj.id(), object.was_observed_by_camera);
++    }
++  }
++
+   /****************************************************************/
+   /*** Predict scene to expected time when the planned          ***/
+   /*** trajectory will be executed                              ***/
+@@ -361,17 +459,43 @@ std::unique_ptr<planning::PredictedScene> PredictedSceneBuilder::buildPredictedS
+       buildCacheStructures(*map, objects_per_lane, ego_object, *reference_lines, predicted_objects);
+   exec_timing.stop();
+ 
++  // Create Terminal Map
++  std::unique_ptr<TerminalMappery> terminal_map = std::make_unique<TerminalMappery>(scene_msg.terminal_map);
++  terminal_map->loadStaticObjectsInTerminal(getStaticObjectBoundaries(predicted_objects));
++
++  // Get parking spots for origin and destination, if they exist in current terminal
++  std::string parking_spot_id = "";
++  if (scene_msg.terminal_map.terminal_id == scene_msg.route.origin_parking_spot.terminal_id) {
++    parking_spot_id = scene_msg.route.origin_parking_spot.id;
++  }
++  if (scene_msg.terminal_map.terminal_id == scene_msg.route.destination_parking_spot.terminal_id) {
++    parking_spot_id = scene_msg.route.destination_parking_spot.id;
++  }
++
++  // Get terminal unpark handoff point pose
++  std::optional<GCSLocation> terminal_unpark_handoff_pose = std::nullopt;
++  if (scene_msg.terminal_map.terminal_id == scene_msg.route.origin_parking_spot.terminal_id) {
++    auto it = std::find_if(scene_msg.route.waypoints.begin(), scene_msg.route.waypoints.end(),
++                           [](const perception_msgs::MapWaypoint& wp) {
++                             return wp.waypoint_type == perception_msgs::MapWaypoint::WAYPOINT_PARKING_OUTFLOW;
++                           });
++    if (it != scene_msg.route.waypoints.end()) {
++      terminal_unpark_handoff_pose = GCSLocation(it->position.x, it->position.y, it->heading);
++    }
++  }
++
+   // Predict future trajectories of all objects
+   exec_timing.start("predictScene", CALLER_INFO());
+   auto new_predicted_scene = std::make_unique<PredictedScene>(
+       scene_msg.header, ego_location, std::move(map), std::move(ego_object), std::move(predicted_objects),
+-      std::move(objects_per_lane), std::move(relevant_vos), std::move(ignored_vos), std::move(frenet_graph),
+-      std::move(*reference_lines), vehicle_odom_T, motion_history, lane_change_request, desired_speed_limit,
+-      std::move(cache), std::move(lane_id_tracker), scene_msg.teleop_output, scene_msg.in_teleop_zone,
+-      scene_msg.manual_lane_change_enabled.data, std::move(distances_to_route_end),
++      std::move(objects_per_lane), std::move(relevant_vos), std::move(ignored_vos), out_of_odd_obj_detected,
++      std::move(frenet_graph), std::move(*reference_lines), vehicle_odom_T, motion_history, lane_change_request,
++      desired_speed_limit, std::move(cache), std::move(lane_id_tracker), scene_msg.teleop_output,
++      scene_msg.in_teleop_zone, scene_msg.manual_lane_change_enabled.data, std::move(distances_to_route_end),
+       std::move(distances_to_merge_transition), scene_msg.in_aggressive_steer_zone, scene_msg.in_no_shift_zone,
+       scene_msg.in_high_curvature_zone, scene_msg.in_shift_zone, scene_msg.shift.direction, scene_msg.shift.value,
+-      options.desired_speed_above_road_limit);
++      options.desired_speed_above_road_limit, terminal_planning_state, parking_spot_id, terminal_unpark_handoff_pose,
++      std::move(terminal_map));
+ 
+   runObjectPredictions(new_predicted_scene.get());
+ 
+@@ -398,16 +522,17 @@ EgoObject PredictedSceneBuilder::constructEgoObject(const perception_msgs::EgoSt
+   // TODO: Special handling for rest areas
+   LaneID lane_id_association = LaneID::UNDEFINED;
+   // get lane information from the mappery
+-  const mappery::SuperLane& ego_lane = lane_graph.getEgoLane()->ego_lane;
++  if (lane_graph.getEgoLane() != nullptr) {
++    const mappery::SuperLane& ego_lane = lane_graph.getEgoLane()->ego_lane;
+ 
+-  auto verified_ego_lane_id = lane_id_tracker.verifyAndGetLaneID(ego_lane.lane_refs);
+-  assert(verified_ego_lane_id);
+-  lane_id_association = *verified_ego_lane_id;
++    auto verified_ego_lane_id = lane_id_tracker.verifyAndGetLaneID(ego_lane.lane_refs);
++    assert(verified_ego_lane_id);
++    lane_id_association = *verified_ego_lane_id;
++  }
+ 
+   // TODO: Ego lane from object will be removed in next scene utils refactor
+   object.ego_lane_id_ = lane_id_association;
+ 
+-
+   TransmissionState transmission_state;
+   transmission_state.current_gear = ego_state.truck_state.TransCurrentGear;
+   transmission_state.gear_change_request = static_cast<GearChangeRequest>(ego_state.gear_change_request);
+@@ -548,6 +673,7 @@ PredictedSceneCache PredictedSceneBuilder::buildCacheStructures(
+     relative_lane_infos[id] =
+         scene_utils::constructLaneInfo(objects_in_lane.at(id), ego_object.getLaneIDAssociation(), predicted_objects);
+   }
++
+   // Set an empty lane info for undefined LaneID's
+   relative_lane_infos[LaneID::UNDEFINED] = LaneInfo();
+ 
+@@ -568,9 +694,12 @@ PredictedSceneCache PredictedSceneBuilder::buildCacheStructures(
+                  return scene_utils::isObjectBehind(ego_object.getObject(), predicted_objects.at(obj_id));
+                });
+ 
+-  boost::optional<lane_map::JunctionRef> next_merging_junction_in_route = lane_map_utils::getNextMergeJunction(
+-      *lane_graph.getEgoLaneRef(), lane_graph.getMap(),
+-      lane_map_utils::forwardRouteLaneFollower(lane_graph.getMap(), lane_graph.getRouteLaneGroups()));
++  boost::optional<lane_map::JunctionRef> next_merging_junction_in_route = boost::none;
++  if (lane_graph.getEgoLaneRef()) {
++    next_merging_junction_in_route = lane_map_utils::getNextMergeJunction(
++        *lane_graph.getEgoLaneRef(), lane_graph.getMap(),
++        lane_map_utils::forwardRouteLaneFollower(lane_graph.getMap(), lane_graph.getRouteLaneGroups()));
++  }
+ 
+   return { std::move(next_merging_junction_in_route), std::move(relative_lane_infos), std::move(front_ego_lane_objects),
+            std::move(back_ego_lane_objects) };
+diff --git a/planning/predicted_scene_builder/src/reference_line_utils.cpp b/planning/predicted_scene_builder/src/reference_line_utils.cpp
+deleted file mode 100644
+index 37769f914..000000000
+--- a/planning/predicted_scene_builder/src/reference_line_utils.cpp
++++ /dev/null
+@@ -1,569 +0,0 @@
+-#include "predicted_scene_builder/reference_line_utils.h"
+-
+-#include <utils/geometric/geometry_msgs.h>
+-#include <utils/ros/msgs_utils.h>
+-
+-#include <queue>
+-
+-#include "diagnostics_utils/instrumentation.h"
+-#include "lane_map_server/mappery/superlane_utils.h"
+-#include "maps/utils/lane_map_following.h"
+-#include "planning_common/utils/spline_fit.h"
+-#include "utils/math/cubicspline.h"
+-#include "utils/math/linearspline.h"
+-#include "utils/math/spline_projection.h"
+-
+-namespace planning {
+-namespace {
+-
+-std::vector<geometry_msgs::Point> superSample(const geometry_msgs::Point& pt_a, const geometry_msgs::Point& pt_b,
+-                                              const double target_discretization_length)
+-{
+-  const double d = geometric::getDistance(pt_a, pt_b);
+-  if (d <= target_discretization_length) {
+-    std::vector<geometry_msgs::Point> output;
+-    output.push_back(pt_a);
+-    output.push_back(pt_b);
+-    return output;
+-  }
+-
+-  const int n_intervals = std::round(d / target_discretization_length);
+-  const double dx = (pt_b.x - pt_a.x) / double(n_intervals);
+-  const double dy = (pt_b.y - pt_a.y) / double(n_intervals);
+-  std::vector<geometry_msgs::Point> super_sampled;
+-  double n_points = n_intervals + 1;
+-  for (size_t i = 0; i < n_points; ++i) {
+-    geometry_msgs::Point pt;
+-    pt.x = pt_a.x + i * dx;
+-    pt.y = pt_a.y + i * dy;
+-    super_sampled.push_back(pt);
+-  }
+-  return super_sampled;
+-}
+-
+-std::vector<geometry_msgs::Point> superSample(const std::vector<geometry_msgs::Point>& path,
+-                                              const double target_discretization_length)
+-{
+-  std::vector<geometry_msgs::Point> super_sampled;
+-  for (size_t i = 0; i + 1 < path.size(); ++i) {
+-    std::vector<geometry_msgs::Point> segment;
+-    segment = superSample(path[i], path[i + 1], target_discretization_length);
+-    // Skip the first point after the first segment to avoid repeated points:
+-    if (i == 0) {
+-      super_sampled.insert(super_sampled.end(), segment.begin(), segment.end());
+-    } else {
+-      super_sampled.insert(super_sampled.end(), segment.begin() + 1, segment.end());
+-    }
+-  }
+-  return super_sampled;
+-}
+-
+-// For an upcomming merge, find where it connects onto ego_referenece_line
+-boost::optional<ReferencePoint> connectPointForNextMerge(const lane_map_utils::MergeJunction& next_merge,
+-                                                         const Mappery& lane_graph,
+-                                                         const ReferenceLine& ego_reference_line)
+-{
+-  const lane_map::Lane* lane_before_merge_ego_side = lane_graph.getMap().getLane(next_merge.path_side_inflow_ref);
+-  const lane_map::Lane* lane_after_merge = lane_graph.getMap().getLane(next_merge.merged_ref);
+-  assert(lane_before_merge_ego_side);
+-  assert(lane_after_merge);
+-  geometry_msgs::Point point_at_merge = lane_after_merge->pts.front();
+-  const size_t lane_sz_before_merge = lane_before_merge_ego_side->pts.size();
+-  assert(lane_sz_before_merge >= 2);
+-  geometry_msgs::Point point_before_merge = lane_before_merge_ego_side->pts.at(lane_sz_before_merge - 2);
+-  // Take mean of last boundary points
+-  Eigen::Vector2d lp, rp;
+-  auto left = lane_graph.getMap().getBoundary(lane_before_merge_ego_side->left_boundary_ref);
+-  auto right = lane_graph.getMap().getBoundary(lane_before_merge_ego_side->right_boundary_ref);
+-  lp << left->pts.back().x, left->pts.back().y;
+-  rp << right->pts.back().x, right->pts.back().y;
+-  Eigen::Vector2d mean = 0.5 * lp + 0.5 * rp;
+-
+-  double end_point_angle = std::atan2(point_at_merge.y - point_before_merge.y, point_at_merge.x - point_before_merge.x);
+-
+-  const ReferencePoint reference_point_before_merge_ego_side = ego_reference_line.getProjectionOnRef(
+-      Point2DH{ mean(0), mean(1), end_point_angle }, constants::PROJECTION_HEADING_THRESHOLD);
+-
+-  return reference_point_before_merge_ego_side;
+-}
+-
+-std::optional<ReferenceLines> limitedReferenceLines(const PlannerParameters& params, const FrenetGraph& frenet_graph,
+-                                                    const EgoObject& ego_object, const Mappery& lane_graph,
+-                                                    const LaneIDTracker& lane_id_tracker, const bool is_teleop_active)
+-{
+-  // We want to generate a reference line for each lane id in the frenet graph. We want the merging
+-  // lane id's to have a perfect connection to the lane it merges into. Therefore, the "normal"
+-  // lanes need to be generated first in order to find the connection point. Since the spline based
+-  // reference line generation is quite expensive we only use it for the ego, left and right lane
+-  // since those are the only lanes used for trajectory generation, the others get less accurate
+-  // polyline based reference line.
+-  //   The spline based reference line is also only used for x meters (currently 150) and there
+-  // after it connects to a non smoothed polyline reference line.
+-
+-  // We do this in two passes:
+-  // First: We generate reference lines for all left and right connections starting from ego until
+-  // there is no more left/right connections
+-
+-  //              +      +      +      +      +
+-  //              |      |      |      |      |
+-  //              |      |      |      |       \
+-  //              |      |      |      |        \
+-  //              |      |      |      |         \
+-  //              |      |      |      |          \
+-  //              |      |      |      |           \
+-  //              |      |      |      |      |\    \
+-  //              |      |      |      |      | \    \
+-  //              |      |      |      |      |  \ M  \
+-  //              |      |      |      |      |   \
+-  //              |      |      |      |      |
+-  //              +  LLL +  LL  +   L  + Ego  +
+-  //  Depth:          3     2       1      0            Merge
+-  //  Type:         Poly    Poly  Spline  Spline         Poly
+-
+-  // Second:
+-  // We loop over all merging lanes and generate a less accurate non smoothed polyline based
+-  // reference line that connects to the reference line it merges into.
+-  diagnostics_utils::SequentialExecution exec_timing;
+-  exec_timing.trace();
+-
+-  // Empty lane ID to reference line dictionary.
+-  std::unordered_map<LaneID, ReferenceLine> lane_id_to_reference_line;
+-  LaneID ego_lane_id = ego_object.getLaneIDAssociation();
+-  const lane_map::LaneRef* ego_lane_ref_ptr = lane_graph.getEgoLaneRef();
+-  if (ego_lane_ref_ptr == nullptr) {
+-    return {};
+-  }
+-  const lane_map::LaneRef& ego_lane_ref = *ego_lane_ref_ptr;
+-  std::unordered_map<LaneID, int> completed_lane_ids;
+-  std::queue<std::pair<LaneID, int>> open_list;
+-  open_list.push({ ego_lane_id, 0 });
+-
+-  std::vector<LaneID> merge_connections;
+-
+-
+-  // TODO: All this would be much simpler if we just had a spline function that was fast enough to
+-  // use everywhere and for the full length of a lane
+-
+-  exec_timing.start("LeftRight", CALLER_INFO());
+-  //
+-  // First pass:
+-  // Generate reference lines for all lanes reachable by left and right connections
+-  //
+-  while (!open_list.empty()) {
+-    // get new lane id to process
+-    const std::pair<LaneID, int> lane_id_depth_pair = open_list.front();
+-    open_list.pop();
+-
+-    LaneID current_lane_id = lane_id_depth_pair.first;
+-
+-    // LaneID has already been processed
+-    if (completed_lane_ids.find(current_lane_id) != completed_lane_ids.end()) {
+-      continue;
+-    }
+-
+-    int current_depth = lane_id_depth_pair.second;
+-    completed_lane_ids[current_lane_id] = current_depth;
+-
+-    // build the reference line for this id
+-    if (current_depth < 2) {
+-      // If it is the center, right, or left ref line, use the spline based generation. This is more
+-      // expensive so we use it only where we need it
+-      exec_timing.start("Spline", CALLER_INFO());
+-      std::optional<ReferenceLine> spline_ref_line = ReferenceLineUtils::buildSplineReferenceLineFromLaneID(
+-          current_lane_id, params, frenet_graph, lane_graph.getMap(), lane_id_tracker, is_teleop_active);
+-      if (!spline_ref_line) {
+-        ROS_ERROR_STREAM_THROTTLE(1, "Failed to generate spline reference line for lane id "
+-                                         << static_cast<int>(current_lane_id));
+-        return std::nullopt;
+-      }
+-      lane_id_to_reference_line[current_lane_id] = *spline_ref_line;
+-    } else {
+-      exec_timing.start("Poly", CALLER_INFO());
+-      // If immediate left or right use a simple polyline ref line
+-      std::optional<ReferenceLine> polyline_ref_line = ReferenceLineUtils::buildPolylineReferenceLineFromLaneID(
+-          current_lane_id, params, frenet_graph, lane_graph.getMap(), nullptr, lane_id_tracker);
+-      if (!polyline_ref_line) {
+-        ROS_ERROR_STREAM_THROTTLE(1, "Failed to generate polyline reference line for lane id "
+-                                         << static_cast<int>(current_lane_id));
+-        return std::nullopt;
+-      }
+-      lane_id_to_reference_line[current_lane_id] = *polyline_ref_line;
+-    }
+-
+-    // Add all left right connections from the current LaneID to the open list for processing
+-    const std::vector<NodeID>& nodes_per_lane_id = frenet_graph.getNodesOnLaneID(current_lane_id);
+-    for (const NodeID node_id : nodes_per_lane_id) {
+-      const FrenetNode& current_node = frenet_graph.getNode(node_id);
+-      // Add any left connections and increase depth
+-      if (current_node.left_connection(ego_lane_ref) != LaneID::UNDEFINED) {
+-        open_list.push({ current_node.left_connection(ego_lane_ref), current_depth + 1 });
+-      }
+-
+-      // Add any right connections and increase depth
+-      if (current_node.right_connection(ego_lane_ref) != LaneID::UNDEFINED) {
+-        open_list.push({ current_node.right_connection(ego_lane_ref), current_depth + 1 });
+-      }
+-
+-      // Keep track of all merge lanes for second pass
+-      for (const LaneID merge_lane : current_node.merge_connections()) {
+-        if (merge_lane != LaneID::UNDEFINED) {
+-          merge_connections.push_back(merge_lane);
+-        }
+-      }
+-    }
+-  }
+-
+-  exec_timing.start("Merge", CALLER_INFO());
+-  //
+-  // Second pass:
+-  // Generate reference lines for one (\todo all) incoming merge lane(s and split lanes)
+-  boost::optional<ReferencePoint> connect_point_merge;
+-  LaneID merging_lane_id = LaneID::UNDEFINED;
+-  boost::optional<lane_map_utils::MergeJunction> next_merge = lane_map_utils::getNextMerge(
+-      ego_lane_ref, lane_graph.getMap(),
+-      lane_map_utils::forwardRouteLaneFollower(lane_graph.getMap(), lane_graph.getRouteLaneGroups()));
+-
+-  if (next_merge) {
+-    connect_point_merge = connectPointForNextMerge(*next_merge, lane_graph, lane_id_to_reference_line.at(ego_lane_id));
+-    merging_lane_id = lane_id_tracker.getLaneID(next_merge->other_side_inflow_ref);
+-
+-    // Build a polyline based reference line that connects to the lane we are merging onto
+-    std::optional<ReferenceLine> polyline_ref_line = ReferenceLineUtils::buildPolylineReferenceLineFromLaneID(
+-        merging_lane_id, params, frenet_graph, lane_graph.getMap(), &(*connect_point_merge), lane_id_tracker);
+-
+-    if (!polyline_ref_line) {
+-      ROS_ERROR_STREAM_THROTTLE(1, "Failed to generate polyline reference line for merging lane id "
+-                                       << static_cast<int>(merging_lane_id));
+-      return std::nullopt;
+-    }
+-    lane_id_to_reference_line[merging_lane_id] = *polyline_ref_line;
+-  }
+-
+-  ReferenceLines result(lane_id_to_reference_line, merging_lane_id);
+-  result.connect_point_merge = connect_point_merge;
+-  return std::move(result);
+-}
+-
+-std::optional<ReferenceLines> allReferenceLines(const PlannerParameters& params, const FrenetGraph& frenet_graph,
+-                                                const EgoObject& ego_object, const Mappery& lane_graph,
+-                                                const LaneIDTracker& lane_id_tracker, const bool is_teleop_active)
+-{
+-  diagnostics_utils::SequentialExecution exec_timing;
+-  exec_timing.trace();
+-  // Empty lane ID to reference line dictionary.
+-  std::unordered_map<LaneID, ReferenceLine> lane_id_to_reference_line;
+-  LaneID ego_lane_id = ego_object.getLaneIDAssociation();
+-  const lane_map::LaneRef* ego_lane_ref_ptr = lane_graph.getEgoLaneRef();
+-  if (ego_lane_ref_ptr == nullptr) {
+-    return {};
+-  }
+-  const lane_map::LaneRef& ego_lane_ref = *ego_lane_ref_ptr;
+-  // If it's ego's lane or left/right of ego: use a spline
+-  // otherwise:                               use a polyline
+-  const std::vector<NodeID>& nodes_on_ego_lane = frenet_graph.getNodesOnLaneID(ego_lane_id);
+-
+-  // TODO: Generate spline reference line for all?
+-  for (const LaneID lane_id : lane_id_tracker.getAllLaneIDs()) {
+-    bool is_central_lane = lane_id == ego_lane_id;
+-    if (!is_central_lane) {
+-      // check if left/right of ego
+-      for (const NodeID node_id : nodes_on_ego_lane) {
+-        const FrenetNode& current_node = frenet_graph.getNode(node_id);
+-        if (current_node.left_connection(ego_lane_ref) == lane_id) {
+-          is_central_lane = true;
+-        }
+-        if (current_node.right_connection(ego_lane_ref) == lane_id) {
+-          is_central_lane = true;
+-        }
+-      }
+-    }
+-    if (is_central_lane) {
+-      exec_timing.start("Spline", CALLER_INFO());
+-      std::optional<ReferenceLine> spline_ref_line = ReferenceLineUtils::buildSplineReferenceLineFromLaneID(
+-          lane_id, params, frenet_graph, lane_graph.getMap(), lane_id_tracker, is_teleop_active);
+-      if (!spline_ref_line) {
+-        ROS_ERROR_STREAM_THROTTLE(1,
+-                                  "Failed to generate spline reference line for lane id " << static_cast<int>(lane_id));
+-        return std::nullopt;
+-      }
+-      lane_id_to_reference_line[lane_id] = *spline_ref_line;
+-    } else {
+-      exec_timing.start("Poly", CALLER_INFO());
+-      std::optional<ReferenceLine> polyline_ref_line = ReferenceLineUtils::buildPolylineReferenceLineFromLaneID(
+-          lane_id, params, frenet_graph, lane_graph.getMap(), nullptr, lane_id_tracker);
+-      if (!polyline_ref_line) {
+-        ROS_ERROR_STREAM_THROTTLE(1, "Failed to generate polyline reference line for lane id "
+-                                         << static_cast<int>(lane_id));
+-        return std::nullopt;
+-      }
+-      lane_id_to_reference_line[lane_id] = *polyline_ref_line;
+-    }
+-  }
+-
+-  // Next merge for ego
+-  boost::optional<lane_map_utils::MergeJunction> next_merge = lane_map_utils::getNextMerge(
+-      ego_lane_ref, lane_graph.getMap(),
+-      lane_map_utils::forwardRouteLaneFollower(lane_graph.getMap(), lane_graph.getRouteLaneGroups()));
+-  boost::optional<ReferencePoint> connect_point_merge;
+-  if (next_merge) {
+-    connect_point_merge = connectPointForNextMerge(*next_merge, lane_graph, lane_id_to_reference_line.at(ego_lane_id));
+-  }
+-
+-  ReferenceLines result(lane_id_to_reference_line);
+-  result.connect_point_merge = connect_point_merge;
+-  return std::move(result);
+-}
+-} // namespace
+-
+-std::optional<ReferenceLines> ReferenceLineUtils::generateReferenceLines(
+-    const PlannerParameters& params, const FrenetGraph& frenet_graph, const EgoObject& ego_object,
+-    const Mappery& lane_graph, const LaneIDTracker& lane_id_tracker, const bool is_teleop_active,
+-    bool limit_reference_lines)
+-{
+-  if (limit_reference_lines) {
+-    return limitedReferenceLines(params, frenet_graph, ego_object, lane_graph, lane_id_tracker, is_teleop_active);
+-  } else {
+-    return allReferenceLines(params, frenet_graph, ego_object, lane_graph, lane_id_tracker, is_teleop_active);
+-  }
+-}
+-
+-std::optional<ReferenceLine> ReferenceLineUtils::buildSplineReferenceLineFromLaneID(
+-    LaneID init_lane_id, const PlannerParameters& /*params*/, const FrenetGraph& /*frenet_graph*/,
+-    const maps::LaneSubMap& map, const LaneIDTracker& id_tracker, const bool is_teleop_active)
+-{
+-  using Projection = utils_math::spline::PolylineProjection;
+-  using AngleConstraint = utils_math::spline::AngleConstraint<double>;
+-  constexpr double SMOOTHING_FACTOR = 0.95;
+-
+-  // Grab the center lane along the superlanes
+-  std::vector<geometry_msgs::Point> lane_path_geometry = generateGeometryLanePath(init_lane_id, map, id_tracker);
+-
+-  // Convert to Eigen
+-  Eigen::Matrix2Xd lane_path_points(2, lane_path_geometry.size());
+-  for (std::size_t i = 0; i < lane_path_geometry.size(); ++i) {
+-    lane_path_points(0, static_cast<int>(i)) = lane_path_geometry[i].x;
+-    lane_path_points(1, static_cast<int>(i)) = lane_path_geometry[i].y;
+-  }
+-
+-  // Generate arc-length parameterized smoothing spline
+-  const auto spline = utils_math::spline::CubicSpline<double, 2>::arcLengthParameterized(
+-      lane_path_points, utils_math::spline::CubicSplineFit<double, 2>::smoothingSpline(SMOOTHING_FACTOR));
+-
+-  // Calculate the number of samples required at the desired resolution
+-  constexpr double RESOLUTION = 0.3;
+-  constexpr double TELEOP_RESOLUTION = 0.1;
+-  const double resolution = is_teleop_active ? TELEOP_RESOLUTION : RESOLUTION;
+-  const double clamped_max_length = std::floor(spline.length() / resolution) * resolution;
+-  const auto num_samples = static_cast<int>(clamped_max_length / resolution) + 1;
+-
+-  // resample the spline
+-  Eigen::RowVectorXd samples = Eigen::RowVectorXd::LinSpaced(num_samples, 0.0, clamped_max_length);
+-  Eigen::Matrix<double, 5, Eigen::Dynamic> reference_points(5, num_samples);
+-  Eigen::Matrix<double, 2, Eigen::Dynamic> tangents(2, num_samples);
+-  Eigen::Matrix<double, 2, Eigen::Dynamic> normals(2, num_samples);
+-
+-  // helper -- 2d cross product
+-  const auto cross2d = [](const Eigen::Vector2d& a, const Eigen::Vector2d& b) { return a[0] * b[1] - a[1] * b[0]; };
+-
+-  // get reference values
+-  for (int i = 0; i < samples.size(); ++i) {
+-    const double sample = samples[i];
+-    const int idx = spline.locate(sample);
+-
+-    const Eigen::Vector2d d1 = spline.derivative<1>(sample, idx);
+-    const Eigen::Vector2d d2 = spline.derivative<2>(sample, idx);
+-    const Eigen::Vector2d d3 = spline.derivative<3>(sample, idx);
+-
+-    // do not assume arc length parameterization is accurate
+-    // normalize tangent and normal
+-    // use full expressions for curvature and derivative
+-    const auto d1_norm = d1.norm();
+-    const auto d1_norm_3 = d1_norm * d1_norm * d1_norm;
+-    const auto d1_norm_5 = d1_norm_3 * d1_norm * d1_norm;
+-
+-    tangents.col(i) = d1_norm == 0.0 ? d1 : d1 / d1_norm; // replicate Eigen's .normalized()
+-    normals(0, i) = -tangents(1, i);
+-    normals(1, i) = tangents(0, i);
+-    reference_points.col(i).topRows<2>() = spline(sample, idx);
+-    reference_points(2, i) = std::atan2(tangents(1, i), tangents(0, i));
+-    reference_points(3, i) = cross2d(d1, d2) / d1_norm_3;
+-    reference_points(4, i) =
+-        ((cross2d(d2, d2) + cross2d(d1, d3)) / d1_norm_3) - (3.0 * (d1.dot(d2)) * cross2d(d1, d2) / d1_norm_5);
+-  }
+-
+-  // fit a polyline
+-  const utils_math::spline::PolylineView<double, 2> polyline(samples, reference_points.topRows<2>());
+-
+-  // project on polyline
+-  const Projection projector;
+-  const Eigen::Vector2d ego_position = Eigen::Vector2d::Zero();
+-  const Eigen::Vector2d ego_direction(1.0, 0.0);
+-  const auto result =
+-      projector(polyline, ego_position, ego_direction, AngleConstraint(constants::PROJECTION_HEADING_THRESHOLD));
+-
+-  // If we failed to do the projection (no segment within angle constraint) -> crash.
+-  if (!result) {
+-    return std::nullopt;
+-  }
+-  // move the s-origin
+-  samples.array() -= result->parameter;
+-
+-  // now convert back to bad legacy data structures
+-  std::vector<ReferencePoint> reference_point_vec;
+-  reference_point_vec.reserve(static_cast<std::size_t>(samples.size()));
+-  for (int i = 0; i < samples.size(); ++i) {
+-    reference_point_vec.emplace_back(reference_points(0, i), reference_points(1, i), reference_points(2, i),
+-                                     reference_points(3, i), reference_points(4, i), tangents.col(i), normals.col(i),
+-                                     samples[i]);
+-  }
+-
+-  // return reference line with lane ID
+-  return ReferenceLine(reference_point_vec, init_lane_id);
+-}
+-
+-std::optional<ReferenceLine> ReferenceLineUtils::buildPolylineReferenceLineFromLaneID(
+-    LaneID init_lane_id, const PlannerParameters& params, const FrenetGraph& frenet_graph, const maps::LaneSubMap& map,
+-    const ReferencePoint* connect_point, const LaneIDTracker& id_tracker)
+-{
+-  // Empty lane path for the current lane ID.
+-  std::vector<geometry_msgs::Point> lane_path_geometry = generateGeometryLanePath(init_lane_id, map, id_tracker);
+-
+-  std::vector<CurvePoint> lane_path_curve_point = generateCurvedPointLanePath(lane_path_geometry, params);
+-
+-  std::optional<ReferenceLine> reference_line =
+-      generatePolylineReferenceLine(lane_path_curve_point, init_lane_id, 3.0, connect_point);
+-  if (!reference_line) {
+-    return std::nullopt;
+-  }
+-
+-  // Do not reset origin of ref line if we have a connection point determines the s frame
+-  if (connect_point == nullptr) {
+-    reference_line->setSOriginByProjectionWithHeadingCheck(CartesianState());
+-
+-    const double s_start = -params.reference_line.s_end_total_ref;
+-    const double s_end = params.reference_line.s_end_total_ref;
+-    reference_line->clip(s_start, s_end);
+-  }
+-
+-  // Generate the new reference line.
+-  return *reference_line;
+-}
+-
+-std::optional<ReferenceLine> ReferenceLineUtils::generatePolylineReferenceLine(const std::vector<CurvePoint>& path,
+-                                                                               const LaneID new_id, const double dS,
+-                                                                               const ReferencePoint* connect_point)
+-{
+-  // First generate a reference line over the sparse points given from the road center. These
+-  // points can have no guarantee to be equidistantly sampled so in the next step we need to
+-  // resample at our desired dS.
+-  std::vector<ReferencePoint> reference_points;
+-  for (size_t i = 0; i + 1 < path.size(); i++) {
+-    Eigen::Vector2d tangent;
+-    tangent(0) = path.at(i + 1).x - path.at(i).x;
+-    tangent(1) = path.at(i + 1).y - path.at(i).y;
+-    tangent.normalize();
+-
+-    // Calculate normal
+-    Eigen::Vector2d normal;
+-    normal(0) = -tangent(1);
+-    normal(1) = tangent(0);
+-    normal.normalize();
+-
+-    const double heading = std::atan2(tangent(1), tangent(0));
+-    const double curvature = 0.0;
+-    const double curvature_prim = 0.0;
+-
+-    const CurvePoint& p = path.at(i);
+-    reference_points.emplace_back(p.x, p.y, heading, curvature, curvature_prim, tangent, normal, p.arclength_s);
+-  }
+-
+-  // Super-sample the coarse reference line with the wanted dS
+-  const double total_length = path.back().arclength_s - path.front().arclength_s;
+-  int num_of_points = static_cast<int>(total_length / dS);
+-
+-  std::vector<ReferencePoint> reference_points_resampled;
+-  reference_points_resampled.reserve(num_of_points);
+-
+-  ReferenceLine coarse_reference_line(std::move(reference_points));
+-
+-  double s = path.front().arclength_s;
+-  while (s <= coarse_reference_line.getMaxS()) {
+-    reference_points_resampled.push_back(coarse_reference_line.getPointAtS(s));
+-    s += dS;
+-  }
+-
+-  ReferenceLine reference_line_resampled(std::move(reference_points_resampled), new_id);
+-
+-  // Sample differently depending if we want to connect to a rear point or not
+-  if (connect_point != nullptr) {
+-    reference_line_resampled.setSAtPoint(Point2DH{ connect_point->x, connect_point->y, connect_point->heading },
+-                                         connect_point->arclength_s);
+-  }
+-
+-  if (reference_line_resampled.getPoints().size() <= 1) {
+-    ROS_ERROR("Failed reference line generation! Line has one or fewer points after resampling.");
+-    return std::nullopt;
+-  }
+-
+-  return reference_line_resampled;
+-}
+-
+-std::vector<geometry_msgs::Point> ReferenceLineUtils::generateGeometryLanePath(LaneID lane_id,
+-                                                                               const maps::LaneSubMap& map,
+-                                                                               const LaneIDTracker& id_tracker)
+-{
+-  // Generate lane path for each lane.
+-  const std::vector<lane_map::LaneRef>& lane = id_tracker.getLaneRefs(lane_id);
+-  return superlane_utils::getSuperPath(superlane_utils::getPathsPerLaneRef(map, lane));
+-}
+-
+-std::vector<CurvePoint> ReferenceLineUtils::generateCurvedPointLanePath(
+-    const std::vector<geometry_msgs::Point>& lane_path_geometry, const PlannerParameters& params)
+-{
+-  // Super sample map lane so it has enough points for spline fit. Sometimes the map can have
+-  // straight line sections where there are 100m between the points
+-  // Sample the map lane for 5 meters resolution
+-  const double resolution = params.reference_line.sample_resolution;
+-  const std::vector<geometry_msgs::Point> super_sampled_lane_path = superSample(lane_path_geometry, resolution);
+-
+-  std::vector<CurvePoint> lane_path = planning_math::convertPointType<CurvePoint>(super_sampled_lane_path);
+-  planning_math::calculateArclengths(&lane_path);
+-
+-  // This needs to take heading into account to account for driving on cloverleaf.
+-  const CurvePoint ego_projection = planning_math::projectOnPolylineWithHeadingCheckSlow(
+-      CurvePoint(), lane_path, /*max_heading_deviation=*/constants::PROJECTION_HEADING_THRESHOLD,
+-      /*p_heading=*/0.0);
+-
+-  // Set s origin to new ego projection
+-  planning_math::setNewSOrigin(ego_projection.arclength_s, lane_path);
+-
+-  return lane_path;
+-}
+-
+-bool ReferenceLineUtils::addPathToReferenceLines(
+-    const LaneID& add_lane_id, const std::vector<geometry_msgs::Point>& path,
+-    const PlannerParameters& params, ReferenceLines& reference_lines)
+-{
+-  // Convert to curve points
+-  std::vector<CurvePoint> path_curve_point = generateCurvedPointLanePath(path, params);
+-
+-  // Generate reference line structure
+-  std::optional<ReferenceLine> reference_line =
+-      generatePolylineReferenceLine(path_curve_point, add_lane_id, 3.0, nullptr);
+-  if (!reference_line) {
+-    return false;
+-  }
+-
+-  // Reset origin of ref line
+-  reference_line->setSOriginByProjectionWithHeadingCheck(CartesianState());
+-  const double s_start = -params.reference_line.s_end_total_ref;
+-  const double s_end = params.reference_line.s_end_total_ref;
+-  reference_line->clip(s_start, s_end);
+-
+-  // Add generated reference line to reference lines
+-  reference_lines.addReferenceLine(add_lane_id, reference_line.value());
+-  return true;
+-}
+-
+-
+-} // namespace planning

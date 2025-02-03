@@ -1,0 +1,416 @@
+diff --git a/planning/planning_common/cfg/Behavior.cfg b/planning/planning_common/cfg/Behavior.cfg
+index 85ea94f14..cbd90b724 100755
+--- a/planning/planning_common/cfg/Behavior.cfg
++++ b/planning/planning_common/cfg/Behavior.cfg
+@@ -13,6 +13,10 @@ gen.add("activate_lane_change_for_vos", bool_t, 0,
+         "activate changing lane for vos by adding a lane cost",
+         False)
+ 
++gen.add("activate_lane_change_for_end_of_route", bool_t, 0,
++        "activate changing lane for end of route cost",
++        True)
++
+ gen.add("activate_lane_preferences", bool_t, 0,
+         "activate changing lanes using map polygon preferences",
+         True)
+diff --git a/planning/planning_common/cfg/FreeSpacePlanner.cfg b/planning/planning_common/cfg/FreeSpacePlanner.cfg
+new file mode 100644
+index 000000000..f8d36c598
+--- /dev/null
++++ b/planning/planning_common/cfg/FreeSpacePlanner.cfg
+@@ -0,0 +1,36 @@
++#!/usr/bin/env python
++from dynamic_reconfigure.parameter_generator_catkin import ParameterGenerator, double_t, int_t
++
++PACKAGE = "planner"
++
++gen = ParameterGenerator()
++
++gen.add("turning_radius", double_t, 0,
++        "turning radius of the vehicle [meters]",
++        10.6, 6.0, 12.0)
++gen.add("transition_cost", double_t, 0,
++        "cost of transitioning between different maneuvers",
++        0.1, 0.0, 1.0)
++gen.add("iterations", int_t, 0,
++        "number of iterations for the piano mover planner",
++        2, 1, 5)
++gen.add("search_radius", double_t, 0,
++        "search radius to use for improved goal search [meters]",
++        1.0, 0.5, 5.0)
++gen.add("cell_size", double_t, 0,
++        "size of a cell in the costmap [meters]",
++        0.2, 0.01, 0.5)
++gen.add("space_dim_size", int_t, 0,
++        "size of the space dimension in the costmap",
++        256, 64, 1024)
++gen.add("angle_dim_size", int_t, 0,
++        "size of the angle dimension in the costmap",
++        256, 64, 1024)
++gen.add("weight1", double_t, 0,
++        "weight for the distance cost in the goal search algorithm",
++        2.0, 0.0, 10.0)
++gen.add("weight2", double_t, 0,
++        "weight for the heading cost in the goal search algorithm",
++        2.0, 0.0, 10.0)
++
++exit(gen.generate(PACKAGE, "planner", "FreeSpacePlanner"))
+diff --git a/planning/planning_common/cfg/SpeedLimiter.cfg b/planning/planning_common/cfg/SpeedLimiter.cfg
+index 854631eca..99a5d1e09 100755
+--- a/planning/planning_common/cfg/SpeedLimiter.cfg
++++ b/planning/planning_common/cfg/SpeedLimiter.cfg
+@@ -40,5 +40,8 @@ gen.add("max_speed_for_autonmous_truck", double_t, 0,
+ gen.add("vehicle_on_shoulder_safety_distance", double_t, 0,
+         "The safety distance before and after vehicle on shoulder",
+         20.0, 0.0, 50.0)
++gen.add("terminal_parking_speed_limit", double_t, 0,
++        "The speed limit for terminal parking / unparking",
++        1.5, 0.0, 3.0)
+ 
+ exit(gen.generate(PACKAGE, "planner", "SpeedLimiter"))
+diff --git a/planning/planning_common/cfg/TerminalPlanner.cfg b/planning/planning_common/cfg/TerminalPlanner.cfg
+new file mode 100644
+index 000000000..982f96f0b
+--- /dev/null
++++ b/planning/planning_common/cfg/TerminalPlanner.cfg
+@@ -0,0 +1,30 @@
++#!/usr/bin/env python
++from dynamic_reconfigure.parameter_generator_catkin import ParameterGenerator, double_t
++
++PACKAGE = "planner"
++
++gen = ParameterGenerator()
++
++gen.add("transform_min_cost", double_t, 0,
++        "Minimum cost for the distance transform",
++        0.1, 0.0, 1.0)
++gen.add("transform_max_cost_parking_spot", double_t, 0,
++        "Maximum cost for the distance transform for parking spot",
++        1.0, 0.0, 10.0)
++gen.add("transform_max_cost_static_obstacle", double_t, 0,
++        "Maximum cost for the distance transform for static obstacle",
++        2.0, 0.0, 10.0)
++gen.add("transform_scale_cost", double_t, 0,
++        "Scale for the distance transform",
++        2.0, 0.0, 10.0)
++gen.add("costmap_longitudinal_margin", double_t, 0,
++        "Longitudinal Offset in CostMap2D [meters]",
++        1.0, 0.0, 10.0)
++gen.add("free_space_path_extend_distance", double_t, 0,
++        "Extension distance of the free space path [meters]",
++        10.0, 0.0, 100.0)
++gen.add("free_space_path_extend_delta_distance", double_t, 0,
++        "Distance between each point for extension of the free space path [meters]",
++        0.2, 0.1, 1.0)
++
++exit(gen.generate(PACKAGE, "planner", "TerminalPlanner"))
+diff --git a/planning/planning_common/cfg/Tgv2LaneKeepingMotionPlanner.cfg b/planning/planning_common/cfg/Tgv2LaneKeepingMotionPlanner.cfg
+index 12764b79d..bbef13683 100755
+--- a/planning/planning_common/cfg/Tgv2LaneKeepingMotionPlanner.cfg
++++ b/planning/planning_common/cfg/Tgv2LaneKeepingMotionPlanner.cfg
+@@ -190,138 +190,6 @@ gen.add("lane_change_accel_terminal_cost_weight", double_t, 0,
+ gen.add("lane_change_decel_terminal_cost_weight", double_t, 0,
+         "LaneChange terminal deceleration cost weight.", 10.0, 0.0, 20.0)
+ 
+-# TerminalFollowLane parameters
+-gen.add("terminal_follow_lane_min_dist_0mph", double_t, 0,
+-        "TerminalFollowLane hard minimum separation distance when ego is at rest.", 2.5, 0.0, 20.0)
+-gen.add("terminal_follow_lane_min_dist_65mph", double_t, 0,
+-        "TerminalFollowLane hard minimum separation distance when ego is travelling at 65 mph.", 2.5, 0.0, 20.0)
+-gen.add("terminal_follow_lane_soft_min_dist_0mph", double_t, 0,
+-        "TerminalFollowLane soft minimum separation distance when ego is at rest.", 7.5, 0.0, 20.0)
+-gen.add("terminal_follow_lane_soft_min_dist_65mph", double_t, 0,
+-        "TerminalFollowLane soft minimum separation distance when ego is travelling at 65 mph.", 15.0, 0.0, 20.0)
+-gen.add("terminal_follow_lane_min_time_gap", double_t, 0,
+-        "TerminalFollowLane minimum time gap.", 3.6, 3.5, 6.0)
+-gen.add("terminal_follow_lane_min_time_to_collision", double_t, 0,
+-        "TerminalFollowLane hard minimum time to collision.", 2.0, 0.0, 12.0)
+-gen.add("terminal_follow_lane_soft_min_time_to_collision", double_t, 0,
+-        "TerminalFollowLane soft minimum time to collision.", 6.0, 0.0, 12.0)
+-
+-gen.add("terminal_follow_lane_position_cost_weight", double_t, 0,
+-        "TerminalFollowLane position cost weight.", 0.0, 0.0, 20.0)
+-gen.add("terminal_follow_lane_speed_cost_weight", double_t, 0,
+-        "TerminalFollowLane speed cost weight.", 1.75, 0.0, 20.0)
+-gen.add("terminal_follow_lane_accel_cost_weight", double_t, 0,
+-        "TerminalFollowLane acceleration cost weight.", 3.0, 0.0, 20.0)
+-gen.add("terminal_follow_lane_decel_cost_weight", double_t, 0,
+-        "TerminalFollowLane deceleration cost weight.", 3.0, 0.0, 20.0)
+-gen.add("terminal_follow_lane_positive_jerk_cost_weight", double_t, 0,
+-        "TerminalFollowLane positive jerk cost weight.", 10.0, 0.0, 20.0)
+-gen.add("terminal_follow_lane_negative_jerk_cost_weight", double_t, 0,
+-        "TerminalFollowLane negative jerk cost weight.", 10.0, 0.0, 20.0)
+-gen.add("terminal_follow_lane_time_gap_slack_cost_weight", double_t, 0,
+-        "TerminalFollowLane time gap slack cost weight.", 0.05, 0.0, 20.0)
+-gen.add("terminal_follow_lane_dist_slack_cost_weight", double_t, 0,
+-        "TerminalFollowLane dist slack cost weight.", 1.0, 0.0, 20.0)
+-gen.add("terminal_follow_lane_time_to_collision_slack_cost_weight", double_t, 0,
+-        "TerminalFollowLane time to collision slack cost weight.", 0.2, 0.0, 20.0)
+-
+-gen.add("terminal_follow_lane_position_terminal_cost_weight", double_t, 0,
+-        "TerminalFollowLane terminal position cost weight.", 0.0, 0.0, 20.0)
+-gen.add("terminal_follow_lane_speed_terminal_cost_weight", double_t, 0,
+-        "TerminalFollowLane terminal speed cost weight.", 1.75, 0.0, 20.0)
+-gen.add("terminal_follow_lane_accel_terminal_cost_weight", double_t, 0,
+-        "TerminalFollowLane terminal acceleration cost weight.", 2.5, 0.0, 20.0)
+-gen.add("terminal_follow_lane_decel_terminal_cost_weight", double_t, 0,
+-        "TerminalFollowLane terminal deceleration cost weight.", 2.5, 0.0, 20.0)
+-
+-# TerminalPark parameters
+-gen.add("terminal_park_min_dist_0mph", double_t, 0,
+-        "TerminalPark hard minimum separation distance when ego is at rest.", 2.5, 0.0, 20.0)
+-gen.add("terminal_park_min_dist_65mph", double_t, 0,
+-        "TerminalPark hard minimum separation distance when ego is travelling at 65 mph.", 2.5, 0.0, 20.0)
+-gen.add("terminal_park_soft_min_dist_0mph", double_t, 0,
+-        "TerminalPark soft minimum separation distance when ego is at rest.", 7.5, 0.0, 20.0)
+-gen.add("terminal_park_soft_min_dist_65mph", double_t, 0,
+-        "TerminalPark soft minimum separation distance when ego is travelling at 65 mph.", 15.0, 0.0, 20.0)
+-gen.add("terminal_park_min_time_gap", double_t, 0,
+-        "TerminalPark minimum time gap.", 3.6, 3.5, 6.0)
+-gen.add("terminal_park_min_time_to_collision", double_t, 0,
+-        "TerminalPark hard minimum time to collision.", 2.0, 0.0, 12.0)
+-gen.add("terminal_park_soft_min_time_to_collision", double_t, 0,
+-        "TerminalPark soft minimum time to collision.", 6.0, 0.0, 12.0)
+-
+-gen.add("terminal_park_position_cost_weight", double_t, 0,
+-        "TerminalPark position cost weight.", 0.0, 0.0, 20.0)
+-gen.add("terminal_park_speed_cost_weight", double_t, 0,
+-        "TerminalPark speed cost weight.", 1.75, 0.0, 20.0)
+-gen.add("terminal_park_accel_cost_weight", double_t, 0,
+-        "TerminalPark acceleration cost weight.", 3.0, 0.0, 20.0)
+-gen.add("terminal_park_decel_cost_weight", double_t, 0,
+-        "TerminalPark deceleration cost weight.", 3.0, 0.0, 20.0)
+-gen.add("terminal_park_positive_jerk_cost_weight", double_t, 0,
+-        "TerminalPark positive jerk cost weight.", 10.0, 0.0, 20.0)
+-gen.add("terminal_park_negative_jerk_cost_weight", double_t, 0,
+-        "TerminalPark negative jerk cost weight.", 10.0, 0.0, 20.0)
+-gen.add("terminal_park_time_gap_slack_cost_weight", double_t, 0,
+-        "TerminalPark time gap slack cost weight.", 0.05, 0.0, 20.0)
+-gen.add("terminal_park_dist_slack_cost_weight", double_t, 0,
+-        "TerminalPark dist slack cost weight.", 1.0, 0.0, 20.0)
+-gen.add("terminal_park_time_to_collision_slack_cost_weight", double_t, 0,
+-        "TerminalPark time to collision slack cost weight.", 0.2, 0.0, 20.0)
+-
+-gen.add("terminal_park_position_terminal_cost_weight", double_t, 0,
+-        "TerminalPark terminal position cost weight.", 0.0, 0.0, 20.0)
+-gen.add("terminal_park_speed_terminal_cost_weight", double_t, 0,
+-        "TerminalPark terminal speed cost weight.", 1.75, 0.0, 20.0)
+-gen.add("terminal_park_accel_terminal_cost_weight", double_t, 0,
+-        "TerminalPark terminal acceleration cost weight.", 2.5, 0.0, 20.0)
+-gen.add("terminal_park_decel_terminal_cost_weight", double_t, 0,
+-        "TerminalPark terminal deceleration cost weight.", 2.5, 0.0, 20.0)
+-
+-# TerminalUnpark parameters
+-gen.add("terminal_unpark_min_dist_0mph", double_t, 0,
+-        "TerminalUnpark hard minimum separation distance when ego is at rest.", 2.5, 0.0, 20.0)
+-gen.add("terminal_unpark_min_dist_65mph", double_t, 0,
+-        "TerminalUnpark hard minimum separation distance when ego is travelling at 65 mph.", 2.5, 0.0, 20.0)
+-gen.add("terminal_unpark_soft_min_dist_0mph", double_t, 0,
+-        "TerminalUnpark soft minimum separation distance when ego is at rest.", 7.5, 0.0, 20.0)
+-gen.add("terminal_unpark_soft_min_dist_65mph", double_t, 0,
+-        "TerminalUnpark soft minimum separation distance when ego is travelling at 65 mph.", 15.0, 0.0, 20.0)
+-gen.add("terminal_unpark_min_time_gap", double_t, 0,
+-        "TerminalUnpark minimum time gap.", 3.6, 3.5, 6.0)
+-gen.add("terminal_unpark_min_time_to_collision", double_t, 0,
+-        "TerminalUnpark hard minimum time to collision.", 2.0, 0.0, 12.0)
+-gen.add("terminal_unpark_soft_min_time_to_collision", double_t, 0,
+-        "TerminalUnpark soft minimum time to collision.", 6.0, 0.0, 12.0)
+-
+-gen.add("terminal_unpark_position_cost_weight", double_t, 0,
+-        "TerminalUnpark position cost weight.", 0.0, 0.0, 20.0)
+-gen.add("terminal_unpark_speed_cost_weight", double_t, 0,
+-        "TerminalUnpark speed cost weight.", 1.75, 0.0, 20.0)
+-gen.add("terminal_unpark_accel_cost_weight", double_t, 0,
+-        "TerminalUnpark acceleration cost weight.", 3.0, 0.0, 20.0)
+-gen.add("terminal_unpark_decel_cost_weight", double_t, 0,
+-        "TerminalUnpark deceleration cost weight.", 3.0, 0.0, 20.0)
+-gen.add("terminal_unpark_positive_jerk_cost_weight", double_t, 0,
+-        "TerminalUnpark positive jerk cost weight.", 10.0, 0.0, 20.0)
+-gen.add("terminal_unpark_negative_jerk_cost_weight", double_t, 0,
+-        "TerminalUnpark negative jerk cost weight.", 10.0, 0.0, 20.0)
+-gen.add("terminal_unpark_time_gap_slack_cost_weight", double_t, 0,
+-        "TerminalUnpark time gap slack cost weight.", 0.05, 0.0, 20.0)
+-gen.add("terminal_unpark_dist_slack_cost_weight", double_t, 0,
+-        "TerminalUnpark dist slack cost weight.", 1.0, 0.0, 20.0)
+-gen.add("terminal_unpark_time_to_collision_slack_cost_weight", double_t, 0,
+-        "TerminalUnpark time to collision slack cost weight.", 0.2, 0.0, 20.0)
+-
+-gen.add("terminal_unpark_position_terminal_cost_weight", double_t, 0,
+-        "TerminalUnpark terminal position cost weight.", 0.0, 0.0, 20.0)
+-gen.add("terminal_unpark_speed_terminal_cost_weight", double_t, 0,
+-        "TerminalUnpark terminal speed cost weight.", 1.75, 0.0, 20.0)
+-gen.add("terminal_unpark_accel_terminal_cost_weight", double_t, 0,
+-        "TerminalUnpark terminal acceleration cost weight.", 2.5, 0.0, 20.0)
+-gen.add("terminal_unpark_decel_terminal_cost_weight", double_t, 0,
+-        "TerminalUnpark terminal deceleration cost weight.", 2.5, 0.0, 20.0)
+-
+ # Optimizer Parameters
+ gen.add("eps_abs", double_t, 0, "Absolute termination tolerance", 1.0e-3, 0.0, 1.0)
+ gen.add("eps_rel", double_t, 0, "Relative termination tolerance", 1.0e-3, 0.0, 1.0)
+diff --git a/planning/planning_common/cfg/Tgv2LaneKeepingPathPlanner.cfg b/planning/planning_common/cfg/Tgv2LaneKeepingPathPlanner.cfg
+index 2a8e99128..2238fdaf4 100755
+--- a/planning/planning_common/cfg/Tgv2LaneKeepingPathPlanner.cfg
++++ b/planning/planning_common/cfg/Tgv2LaneKeepingPathPlanner.cfg
+@@ -13,9 +13,9 @@ gen.add("min_ref_line_sampled_param", double_t, 0,
+ gen.add("max_ref_line_sampled_param", double_t, 0,
+         "Maximum parameter to sample the ref line", 360, -500.0, 1000.0) # bounds are the current maximum parameter bounds of a reference line
+ gen.add("vehicle_cost_activation_distance", double_t, 0,
+-        "Lateral distance between ego and generic vehicle below which we penalize proximity.", 0.5, 0.0, 10.0)
++        "Lateral distance between ego and generic vehicle below which we penalize proximity.", 1.2, 0.0, 10.0)
+ gen.add("low_speed_vehicle_cost_activation_distance", double_t, 0,
+-        "Lateral distance between ego and generic vehicle below which we penalize proximity (low speed).", 0.5, 0.0, 10.0)
++        "Lateral distance between ego and generic vehicle below which we penalize proximity (low speed).", 0.6, 0.0, 10.0)
+ gen.add("truck_cost_activation_distance", double_t, 0,
+         "Lateral distance between ego and truck below which we penalize proximity.", 1.2, 0.0, 10.0)
+ gen.add("low_speed_truck_cost_activation_distance", double_t, 0,
+@@ -241,150 +241,6 @@ gen.add("lane_change_max_object_extent", double_t, 0,
+ gen.add("lane_change_min_object_extent", double_t, 0,
+         "Minimum distance from reference line to set nearest object extent if object is approaching ego from behind.", 2.3, 0.0, 10.0)
+ 
+-# TerminalFollowLane cost weights and parameters
+-gen.add("terminal_follow_lane_position_cost", double_t, 0,
+-        "Running cost weight for position difference with respect to nominal.", 1.0, 0.0, 100.0)
+-gen.add("terminal_follow_lane_velocity_cost", double_t, 0,
+-        "Running cost weight for velocity difference with respect to nominal.", 10.0, 0.0, 100.0)
+-gen.add("terminal_follow_lane_acceleration_cost", double_t, 0,
+-        "Running cost weight for acceleration difference with respect to nominal.", 10.0, 0.0, 100.0)
+-gen.add("terminal_follow_lane_race_line_cost", double_t, 0,
+-        "Running cost weight that helps to penalize total lateral acceleration.", 8.0, 0.0, 100.0)
+-gen.add("terminal_follow_lane_jerk_cost", double_t, 0,
+-        "Running cost weight for jerk difference with respect to nominal.", 1.0, 0.0, 100.0)
+-gen.add("terminal_follow_lane_lane_slack_cost", double_t, 0,
+-        "Running cost weight for lane slack variable.", 30.0, 0.0, 100.0)
+-gen.add("terminal_follow_lane_obj_slack_cost", double_t, 0,
+-        "Running cost weight for object slack variable.", 10.0, 0.0, 100.0)
+-
+-gen.add("terminal_follow_lane_position_terminal_cost", double_t, 0,
+-        "Terminal cost weight for position difference", 20.0, 0.0, 1000.0)
+-gen.add("terminal_follow_lane_velocity_terminal_cost", double_t, 0,
+-        "Terminal cost weight for velocity difference", 20.0, 0.0, 1000.0)
+-gen.add("terminal_follow_lane_acceleration_terminal_cost", double_t, 0,
+-        "Terminal cost weight for acceleration difference", 100.0, 0.0, 1000.0)
+-gen.add("terminal_follow_lane_race_line_terminal_cost", double_t, 0,
+-        "Terminal cost weight that helps to penalize total lateral acceleration", 80.0, 0.0, 1000.0)
+-
+-gen.add("terminal_follow_lane_lane_dist", double_t, 0,
+-        "Distance between mirror and lane line below which we penalize ego's lateral position.", 0.14, 0.0, 0.20)
+-gen.add("terminal_follow_lane_lane_dist_drivable_shoulder", double_t, 0,
+-        "Distance between mirror and lane line below which we penalize ego's lateral position when on a drivable shoulder.", 0.10, 0.0, 0.20)
+-gen.add("terminal_follow_lane_lane_dist_insufficient_space", double_t, 0,
+-        "Distance between mirror and lane line below which we penalize ego's lateral position when lateral shifting space is insufficient.", 0.10, 0.0, 0.20)
+-gen.add("terminal_follow_lane_lane_dist_insufficient_space_drivable_shoulder", double_t, 0,
+-        "Distance between mirror and lane line below which we penalize ego's lateral position when on a drivable shoulder and lateral shifting space is insufficient.", 0.05, 0.0, 0.20)
+-
+-gen.add("terminal_follow_lane_pred_time_steps_to_use", int_t, 0, "The number of object prediction timesteps to use to construct hard constraints", 120, 0, 120)
+-gen.add("terminal_follow_lane_use_preds_of_objects_behind_ego", bool_t, 0,
+-        "True if hard constraints should incorporate predictions of objects that start behind ego.", False)
+-gen.add("terminal_follow_lane_max_heading_deviation_deg", double_t, 0,
+-        "constraint on heading error from reference line (degrees)", 40.0, 0.001, 89.999)
+-gen.add("terminal_follow_lane_max_offset_ratio", double_t, 0,
+-        "constraint ratio between lateral offset and reference radius of curvature", 0.1, 0.0, 0.999)
+-gen.add("terminal_follow_lane_shift_activation_distance", double_t, 0,
+-        "Ego will shift if the distance between the reference line and the nearest object extent is less than this value.", 3.66, 0.0, 10.0)
+-gen.add("terminal_follow_lane_max_object_extent", double_t, 0,
+-        "Maximum distance from reference line to set nearest object extent if object is within shifting distance.", 2.3, 0.0, 10.0)
+-gen.add("terminal_follow_lane_min_object_extent", double_t, 0,
+-        "Minimum distance from reference line to set nearest object extent if object is approaching ego from behind.", 2.3, 0.0, 10.0)
+-
+-# TerminalPark cost weights and parameters
+-gen.add("terminal_park_position_cost", double_t, 0,
+-        "Running cost weight for position difference with respect to nominal.", 1.0, 0.0, 100.0)
+-gen.add("terminal_park_velocity_cost", double_t, 0,
+-        "Running cost weight for velocity difference with respect to nominal.", 10.0, 0.0, 100.0)
+-gen.add("terminal_park_acceleration_cost", double_t, 0,
+-        "Running cost weight for acceleration difference with respect to nominal.", 10.0, 0.0, 100.0)
+-gen.add("terminal_park_race_line_cost", double_t, 0,
+-        "Running cost weight that helps to penalize total lateral acceleration.", 8.0, 0.0, 100.0)
+-gen.add("terminal_park_jerk_cost", double_t, 0,
+-        "Running cost weight for jerk difference with respect to nominal.", 1.0, 0.0, 100.0)
+-gen.add("terminal_park_lane_slack_cost", double_t, 0,
+-        "Running cost weight for lane slack variable.", 30.0, 0.0, 100.0)
+-gen.add("terminal_park_obj_slack_cost", double_t, 0,
+-        "Running cost weight for object slack variable.", 10.0, 0.0, 100.0)
+-
+-gen.add("terminal_park_position_terminal_cost", double_t, 0,
+-        "Terminal cost weight for position difference", 20.0, 0.0, 1000.0)
+-gen.add("terminal_park_velocity_terminal_cost", double_t, 0,
+-        "Terminal cost weight for velocity difference", 20.0, 0.0, 1000.0)
+-gen.add("terminal_park_acceleration_terminal_cost", double_t, 0,
+-        "Terminal cost weight for acceleration difference", 100.0, 0.0, 1000.0)
+-gen.add("terminal_park_race_line_terminal_cost", double_t, 0,
+-        "Terminal cost weight that helps to penalize total lateral acceleration", 80.0, 0.0, 1000.0)
+-
+-gen.add("terminal_park_lane_dist", double_t, 0,
+-        "Distance between mirror and lane line below which we penalize ego's lateral position.", 0.14, 0.0, 0.20)
+-gen.add("terminal_park_lane_dist_drivable_shoulder", double_t, 0,
+-        "Distance between mirror and lane line below which we penalize ego's lateral position when on a drivable shoulder.", 0.10, 0.0, 0.20)
+-gen.add("terminal_park_lane_dist_insufficient_space", double_t, 0,
+-        "Distance between mirror and lane line below which we penalize ego's lateral position when lateral shifting space is insufficient.", 0.10, 0.0, 0.20)
+-gen.add("terminal_park_lane_dist_insufficient_space_drivable_shoulder", double_t, 0,
+-        "Distance between mirror and lane line below which we penalize ego's lateral position when on a drivable shoulder and lateral shifting space is insufficient.", 0.05, 0.0, 0.20)
+-
+-gen.add("terminal_park_pred_time_steps_to_use", int_t, 0, "The number of object prediction timesteps to use to construct hard constraints", 120, 0, 120)
+-gen.add("terminal_park_use_preds_of_objects_behind_ego", bool_t, 0,
+-        "True if hard constraints should incorporate predictions of objects that start behind ego.", False)
+-gen.add("terminal_park_max_heading_deviation_deg", double_t, 0,
+-        "constraint on heading error from reference line (degrees)", 40.0, 0.001, 89.999)
+-gen.add("terminal_park_max_offset_ratio", double_t, 0,
+-        "constraint ratio between lateral offset and reference radius of curvature", 0.1, 0.0, 0.999)
+-gen.add("terminal_park_shift_activation_distance", double_t, 0,
+-        "Ego will shift if the distance between the reference line and the nearest object extent is less than this value.", 3.66, 0.0, 10.0)
+-gen.add("terminal_park_max_object_extent", double_t, 0,
+-        "Maximum distance from reference line to set nearest object extent if object is within shifting distance.", 2.3, 0.0, 10.0)
+-gen.add("terminal_park_min_object_extent", double_t, 0,
+-        "Minimum distance from reference line to set nearest object extent if object is approaching ego from behind.", 2.3, 0.0, 10.0)
+-
+-# TerminalUnpark cost weights and parameters
+-gen.add("terminal_unpark_position_cost", double_t, 0,
+-        "Running cost weight for position difference with respect to nominal.", 1.0, 0.0, 100.0)
+-gen.add("terminal_unpark_velocity_cost", double_t, 0,
+-        "Running cost weight for velocity difference with respect to nominal.", 10.0, 0.0, 100.0)
+-gen.add("terminal_unpark_acceleration_cost", double_t, 0,
+-        "Running cost weight for acceleration difference with respect to nominal.", 10.0, 0.0, 100.0)
+-gen.add("terminal_unpark_race_line_cost", double_t, 0,
+-        "Running cost weight that helps to penalize total lateral acceleration.", 8.0, 0.0, 100.0)
+-gen.add("terminal_unpark_jerk_cost", double_t, 0,
+-        "Running cost weight for jerk difference with respect to nominal.", 1.0, 0.0, 100.0)
+-gen.add("terminal_unpark_lane_slack_cost", double_t, 0,
+-        "Running cost weight for lane slack variable.", 30.0, 0.0, 100.0)
+-gen.add("terminal_unpark_obj_slack_cost", double_t, 0,
+-        "Running cost weight for object slack variable.", 10.0, 0.0, 100.0)
+-
+-gen.add("terminal_unpark_position_terminal_cost", double_t, 0,
+-        "Terminal cost weight for position difference", 20.0, 0.0, 1000.0)
+-gen.add("terminal_unpark_velocity_terminal_cost", double_t, 0,
+-        "Terminal cost weight for velocity difference", 20.0, 0.0, 1000.0)
+-gen.add("terminal_unpark_acceleration_terminal_cost", double_t, 0,
+-        "Terminal cost weight for acceleration difference", 100.0, 0.0, 1000.0)
+-gen.add("terminal_unpark_race_line_terminal_cost", double_t, 0,
+-        "Terminal cost weight that helps to penalize total lateral acceleration", 80.0, 0.0, 1000.0)
+-
+-gen.add("terminal_unpark_lane_dist", double_t, 0,
+-        "Distance between mirror and lane line below which we penalize ego's lateral position.", 0.14, 0.0, 0.20)
+-gen.add("terminal_unpark_lane_dist_drivable_shoulder", double_t, 0,
+-        "Distance between mirror and lane line below which we penalize ego's lateral position when on a drivable shoulder.", 0.10, 0.0, 0.20)
+-gen.add("terminal_unpark_lane_dist_insufficient_space", double_t, 0,
+-        "Distance between mirror and lane line below which we penalize ego's lateral position when lateral shifting space is insufficient.", 0.10, 0.0, 0.20)
+-gen.add("terminal_unpark_lane_dist_insufficient_space_drivable_shoulder", double_t, 0,
+-        "Distance between mirror and lane line below which we penalize ego's lateral position when on a drivable shoulder and lateral shifting space is insufficient.", 0.05, 0.0, 0.20)
+-
+-gen.add("terminal_unpark_pred_time_steps_to_use", int_t, 0, "The number of object prediction timesteps to use to construct hard constraints", 120, 0, 120)
+-gen.add("terminal_unpark_use_preds_of_objects_behind_ego", bool_t, 0,
+-        "True if hard constraints should incorporate predictions of objects that start behind ego.", False)
+-gen.add("terminal_unpark_max_heading_deviation_deg", double_t, 0,
+-        "constraint on heading error from reference line (degrees)", 40.0, 0.001, 89.999)
+-gen.add("terminal_unpark_max_offset_ratio", double_t, 0,
+-        "constraint ratio between lateral offset and reference radius of curvature", 0.1, 0.0, 0.999)
+-gen.add("terminal_unpark_shift_activation_distance", double_t, 0,
+-        "Ego will shift if the distance between the reference line and the nearest object extent is less than this value.", 3.66, 0.0, 10.0)
+-gen.add("terminal_unpark_max_object_extent", double_t, 0,
+-        "Maximum distance from reference line to set nearest object extent if object is within shifting distance.", 2.3, 0.0, 10.0)
+-gen.add("terminal_unpark_min_object_extent", double_t, 0,
+-        "Minimum distance from reference line to set nearest object extent if object is approaching ego from behind.", 2.3, 0.0, 10.0)
+-
+ # Optimizer parameters
+ gen.add("eps_abs", double_t, 0, "Absolute termination tolerance", 1.0e-4, 0.0, 1.0)
+ gen.add("eps_rel", double_t, 0, "Relative termination tolerance", 1.0e-4, 0.0, 1.0)

@@ -1,0 +1,177 @@
+diff --git a/planning/lane_id_tracker/include/lane_id_tracker/lane_id_common.h b/planning/lane_id_tracker/include/lane_id_tracker/lane_id_common.h
+index 55913d674..cbd59d371 100644
+--- a/planning/lane_id_tracker/include/lane_id_tracker/lane_id_common.h
++++ b/planning/lane_id_tracker/include/lane_id_tracker/lane_id_common.h
+@@ -16,8 +16,7 @@ enum class LaneID : std::int32_t
+   // objects, the shoulder ids are hard coded to this values
+   LEFT_SHOULDER = -2,
+   RIGHT_SHOULDER = -3,
+-  PARK_PATH = -4,
+-  UNPARK_PATH = -5,
++  PARKING_LANE = -4
+ };
+ 
+ inline std::ostream& operator<<(std::ostream& os, LaneID id)
+diff --git a/planning/lane_id_tracker/src/lane_id_tracker.cpp b/planning/lane_id_tracker/src/lane_id_tracker.cpp
+index ea2304d16..3a8e957ab 100644
+--- a/planning/lane_id_tracker/src/lane_id_tracker.cpp
++++ b/planning/lane_id_tracker/src/lane_id_tracker.cpp
+@@ -14,24 +14,6 @@ namespace planning {
+ 
+ namespace {
+ 
+-const lane_map::Junction* backwardJunction(const maps::LaneSubMap& map, const lane_map::LaneRef lr)
+-{
+-  const lane_map::Lane* lane = map.getLane(lr);
+-  if (lane == nullptr)
+-    return nullptr;
+-  const lane_map::Junction* junct = map.getJunction(lane->start_junction_ref);
+-  return junct; // can be nullptr;
+-}
+-
+-const lane_map::Junction* forwardJunction(const maps::LaneSubMap& map, const lane_map::LaneRef lr)
+-{
+-  const lane_map::Lane* lane = map.getLane(lr);
+-  if (lane == nullptr)
+-    return nullptr;
+-  const lane_map::Junction* junct = map.getJunction(lane->end_junction_ref);
+-  return junct; // can be nullptr;
+-}
+-
+ // Traverse lane graph one step backwards from current_lr, prefering on route LaneRef, non transitioning LaneRef and not
+ // any laneRef in visted_lr
+ std::optional<lane_map::LaneRef>
+@@ -40,7 +22,7 @@ bestBackwardLaneRef(const lane_map::LaneRef& current_lr, const maps::LaneSubMap&
+                     const std::unordered_set<lane_map::LaneRef>& visited_lr)
+ {
+   std::optional<lane_map::LaneRef> best_backward_lr;
+-  const auto* junct = backwardJunction(map, current_lr);
++  const auto* junct = lane_map_utils::backwardJunction(map, current_lr);
+   if (junct != nullptr) {
+     int score = std::numeric_limits<int>::lowest();
+     for (const auto& lr : junct->inflow_refs) {
+@@ -63,14 +45,17 @@ bestBackwardLaneRef(const lane_map::LaneRef& current_lr, const maps::LaneSubMap&
+   return best_backward_lr;
+ }
+ 
+-// Traverse lane graph one step forwards from current_lr, preferring on route LaneRef, non transitioning LaneRef and not
+-// any laneRef in visited_lr
++// Traverse lane graph one step forwards from current_lr, preferring on route LaneRef, non transitioning LaneRef and
++// not any laneRef in visited_lr
+ std::optional<lane_map::LaneRef> bestForwardLaneRef(const lane_map::LaneRef& current_lr, const maps::LaneSubMap& map,
+                                                     const std::unordered_set<lane_map::LaneGroupRef>& route_lane_groups,
+                                                     const std::unordered_set<lane_map::LaneRef>& visited_lr)
+ {
+   std::optional<lane_map::LaneRef> best_forward_lr;
+-  const auto* junct = forwardJunction(map, current_lr);
++  const auto* junct = lane_map_utils::forwardJunction(map, current_lr);
++
++  const lane_map::Lane* current_lane = map.getLane(current_lr);
++  // if the current lane has upcoming split, we should prioritize the lane with is_transitioning
+   if (junct != nullptr) {
+     int score = std::numeric_limits<int>::lowest();
+     for (const auto& lr : junct->outflow_refs) {
+@@ -81,9 +66,9 @@ std::optional<lane_map::LaneRef> bestForwardLaneRef(const lane_map::LaneRef& cur
+         continue;
+       if (visited_lr.count(lr) > 0)
+         continue;
+-      // Use score 10 for on route and additive score 1 for non transitioning such that we always prioritize on_route,
+-      // then break ties with transitioning status.
+-      int score_nxt = (route_lane_groups.count(lr.getLaneGroupRef()) ? 10 : 0) + (lane->is_transitioning ? 0 : 1);
++
++      const int score_nxt =
++          lane_map_utils::ComputeInRouteScore(lr, route_lane_groups, map) + (lane->is_transitioning ? 0 : 1);
+       if (score_nxt > score) {
+         score = score_nxt;
+         best_forward_lr = lr;
+@@ -93,6 +78,17 @@ std::optional<lane_map::LaneRef> bestForwardLaneRef(const lane_map::LaneRef& cur
+   return best_forward_lr;
+ }
+ 
++size_t numLanesInMap(const maps::LaneSubMap& map)
++{
++  size_t num_lane_refs = 0;
++  for (const auto& [tile_id, tile_ptr] : map.tiles()) {
++    for (const auto& [lg_ref, lane_group] : tile_ptr->lane_groups) {
++      num_lane_refs += lane_group.lanes.size();
++    }
++  }
++  return num_lane_refs;
++}
++
+ // This only considers where we are, not how we got there
+ std::vector<lane_map::LaneRef> searchForwardBackwardPath(
+     const maps::LaneSubMap& map, const std::unordered_set<lane_map::LaneGroupRef>& route_lane_groups,
+@@ -101,11 +97,18 @@ std::vector<lane_map::LaneRef> searchForwardBackwardPath(
+   std::stack<lane_map::LaneRef> stack;
+   std::vector<lane_map::LaneRef> backward_path, forward_path;
+ 
++  // Need visited set within the function since we have loops in the graph
++  std::unordered_set<lane_map::LaneRef> local_visited_lr;
++  local_visited_lr.reserve(numLanesInMap(map));
++
+   // DFS backwards to leaf - prefer route, prefer non-transition parents
+   stack.push(ego_lane_ref);
+   while (!stack.empty()) {
+     const lane_map::LaneRef current_lr = stack.top();
+     stack.pop();
++    if (local_visited_lr.count(current_lr) > 0)
++      continue;
++    local_visited_lr.insert(current_lr);
+     // When searching backwards we need to search beyond our route_lane_groups. For some reason
+     // they might not be defined behind us.
+     std::optional<lane_map::LaneRef> best_backward_lr =
+@@ -117,11 +120,16 @@ std::vector<lane_map::LaneRef> searchForwardBackwardPath(
+       backward_path.push_back(current_lr);
+   }
+ 
++  local_visited_lr.clear();
++
+   // DFS forwards to leaf - prefer route, prefer non-transition children (that is for the next junction!)
+   stack.push(ego_lane_ref);
+   while (!stack.empty()) {
+     const lane_map::LaneRef current_lr = stack.top();
+     stack.pop();
++    if (local_visited_lr.count(current_lr) > 0)
++      continue;
++    local_visited_lr.insert(current_lr);
+     // Have to go off route to maintain parity with:
+     // const mappery::SuperLane& ego_lane = lane_graph.getEgoLane()->ego_lane;
+     std::optional<lane_map::LaneRef> best_forward_lr =
+@@ -151,10 +159,17 @@ std::vector<lane_map::LaneRef> searchPath(const maps::LaneSubMap& map,
+   if (visited_lr.count(start_lr) == 0) {
+     stack.push(start_lr);
+   }
++  // Need visited set within the function since we have loops in the graph
++  std::unordered_set<lane_map::LaneRef> local_visited_lr;
++  local_visited_lr.reserve(numLanesInMap(map));
++
+   while (!stack.empty()) {
+     const lane_map::LaneRef current_lr = stack.top();
+     stack.pop();
+-    const auto* junct = forwardJunction(map, current_lr);
++    if (local_visited_lr.count(current_lr) > 0)
++      continue;
++    local_visited_lr.insert(current_lr);
++    const auto* junct = lane_map_utils::forwardJunction(map, current_lr);
+     if (junct != nullptr) {
+       std::optional<lane_map::LaneRef> best_forward_lr =
+           bestForwardLaneRef(current_lr, map, route_lane_groups, visited_lr);
+@@ -166,17 +181,6 @@ std::vector<lane_map::LaneRef> searchPath(const maps::LaneSubMap& map,
+   return forward_path;
+ }
+ 
+-size_t numLanesInMap(const maps::LaneSubMap& map)
+-{
+-  size_t num_lane_refs = 0;
+-  for (const auto& [tile_id, tile_ptr] : map.tiles()) {
+-    for (const auto& [lg_ref, lane_group] : tile_ptr->lane_groups) {
+-      num_lane_refs += lane_group.lanes.size();
+-    }
+-  }
+-  return num_lane_refs;
+-}
+-
+ template <typename T>
+ int lcsLength(const std::vector<T>& s1, const std::vector<T>& s2)
+ {

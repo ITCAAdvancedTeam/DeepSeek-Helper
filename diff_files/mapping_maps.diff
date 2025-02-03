@@ -1,0 +1,1435 @@
+diff --git a/mapping/maps/include/maps/lane_sub_map.h b/mapping/maps/include/maps/lane_sub_map.h
+index e8c5a562f..71bd7d039 100644
+--- a/mapping/maps/include/maps/lane_sub_map.h
++++ b/mapping/maps/include/maps/lane_sub_map.h
+@@ -73,10 +73,17 @@ class LaneSubMap
+ 
+   void markMissingTile(uint64_t tile_id);
+ 
++  /**
++   * @brief Inserts a free space path into the submap.
++   * @param path The path to insert, vector of poses (x, y, theta)
++   * @return Reference to the lane group created from the path, if successful
++   */
++  std::optional<lane_map::LaneGroupRef> insertFreeSpacePath(const std::vector<Eigen::Vector3d>& path);
++
+  private:
+   MapFrame map_frame_;
+   std::unordered_map<uint64_t, std::shared_ptr<MapTileType>> tiles_;
+   std::unordered_set<uint64_t> missing_tiles_;
+ };
+ 
+-} // namespace maps
+\ No newline at end of file
++} // namespace maps
+diff --git a/mapping/maps/include/maps/mission.h b/mapping/maps/include/maps/mission.h
+index c3191821b..8de536c8c 100644
+--- a/mapping/maps/include/maps/mission.h
++++ b/mapping/maps/include/maps/mission.h
+@@ -42,6 +42,6 @@ class MissionPlan
+   std::unordered_set<lane_map::LaneGroupRef> route_lane_groups_;
+ };
+ 
+-}; // namespace mission_plan
++};     // namespace mission_plan
+ 
+ #endif // UTILS_MISSION_MISSION_H
+diff --git a/mapping/maps/include/maps/tile_loading.h b/mapping/maps/include/maps/tile_loading.h
+index 848165a55..41dce3dc1 100644
+--- a/mapping/maps/include/maps/tile_loading.h
++++ b/mapping/maps/include/maps/tile_loading.h
+@@ -25,4 +25,4 @@ std::shared_ptr<lane_map::Tile> loadTile(const std::string& tile_dir, const uint
+  **/
+ void loadAllTiles(maps::LaneSubMap& map, const std::string& tile_dir);
+ 
+-} // namespace maps
+\ No newline at end of file
++} // namespace maps
+diff --git a/mapping/maps/include/maps/tiled_zone_atlas.h b/mapping/maps/include/maps/tiled_zone_atlas.h
+index 7cc8de3c9..5c90429a9 100644
+--- a/mapping/maps/include/maps/tiled_zone_atlas.h
++++ b/mapping/maps/include/maps/tiled_zone_atlas.h
+@@ -29,4 +29,4 @@ TiledZoneAtlas createZoneAtlas(MapZoneAtlasType atlas_type, const std::string& m
+  */
+ TiledZoneAtlas createZoneAtlas(const std::string& directory_path, MapFrameType frame_convention);
+ 
+-} // namespace maps
+\ No newline at end of file
++} // namespace maps
+diff --git a/mapping/maps/include/maps/tiled_zone_map.h b/mapping/maps/include/maps/tiled_zone_map.h
+index b528a91cc..d41a6103b 100644
+--- a/mapping/maps/include/maps/tiled_zone_map.h
++++ b/mapping/maps/include/maps/tiled_zone_map.h
+@@ -22,6 +22,7 @@ enum class MapZoneType
+   SHIFT_ZONES,
+   HIGH_CURVATURE_ZONES,
+   AGGRESSIVE_STEER_ZONES,
++  TERMINAL_AREA_ZONES,
+   TELEOP
+ };
+ 
+@@ -54,8 +55,10 @@ class TiledZoneMap
+ 
+   std::vector<ZoneAndProperties> getAllZonesWithProperties() const;
+ 
++  uint64_t getNearbyZoneTileId() const;
++
+  private:
+   std::unordered_map<uint64_t, std::vector<ZoneAndProperties>> tiles_;
+ };
+ 
+-} // namespace maps
+\ No newline at end of file
++} // namespace maps
+diff --git a/mapping/maps/include/maps/utils/ego_lane_finder.h b/mapping/maps/include/maps/utils/ego_lane_finder.h
+index ddd5a3ab6..51759d9f3 100644
+--- a/mapping/maps/include/maps/utils/ego_lane_finder.h
++++ b/mapping/maps/include/maps/utils/ego_lane_finder.h
+@@ -81,9 +81,10 @@ std::vector<lane_map::LaneRef> getEgoLanes(const maps::LaneSubMap& map,
+  * @returns A vector of LaneRefs. Filters refs not in the map. Sorted by
+  *decreasing preference.
+  **/
+-std::vector<lane_map::LaneRef> getNominalLanes(const maps::LaneSubMap& map,
+-                                               const std::unordered_set<lane_map::LaneRef>& candidate_lanes,
+-                                               lane_map_utils::TraverseDirection direction);
++std::vector<lane_map::LaneRef>
++getNominalLanes(const maps::LaneSubMap& map, const std::unordered_set<lane_map::LaneRef>& candidate_lanes,
++                lane_map_utils::TraverseDirection direction,
++                const std::unordered_set<lane_map::LaneGroupRef>& route_lane_groups = {});
+ 
+ } // namespace ego_lane_finder
+ 
+diff --git a/mapping/maps/include/maps/utils/lane_map_following.h b/mapping/maps/include/maps/utils/lane_map_following.h
+index 4578172ec..c48415e1a 100644
+--- a/mapping/maps/include/maps/utils/lane_map_following.h
++++ b/mapping/maps/include/maps/utils/lane_map_following.h
+@@ -171,6 +171,6 @@ std::vector<lane_map::LaneRef> followLanesWhile(const lane_map::LaneRef& initial
+ std::vector<lane_map::LaneGroupRef>
+ followLaneGroupsWhile(const lane_map::LaneGroupRef& initial_lg_ref, const LaneGroupFollower& lg_follower,
+                       const std::function<bool(const lane_map::LaneGroupRef&)>& condition);
+-}; // namespace lane_map_utils
++};     // namespace lane_map_utils
+ 
+ #endif // MAPS_MAP_UTILS_LANE_MAP_FOLLOWING
+diff --git a/mapping/maps/include/maps/utils/lane_map_utils.h b/mapping/maps/include/maps/utils/lane_map_utils.h
+index 4bc53c902..61e1befe8 100644
+--- a/mapping/maps/include/maps/utils/lane_map_utils.h
++++ b/mapping/maps/include/maps/utils/lane_map_utils.h
+@@ -15,6 +15,12 @@
+ 
+ namespace lane_map_utils {
+ 
++constexpr int kInRouteScoreSearchDepth = 3;
++constexpr int kRouteScoreIncrement = 10;
++constexpr double kFreeSpacePathBoundaryWidth = 2.0; // Width of the lane group boundary in meters from lane center
++constexpr uint64_t kFreeSpacePathLgId = UINT64_MAX; // Unique lane group id for free space path
++constexpr double kFreeSpacePathSpeedLimit = 3.5;    // Speed in mph on free space path for parking and unparking
++
+ class MapDataError : public std::runtime_error
+ {
+  public:
+@@ -85,9 +91,15 @@ getConnectedLaneGroups(const maps::LaneSubMap& map, const lane_map::ConnectorRef
+  * at beginning of vector and right most lane at the end; Returns empty
+  * vector when a lane group with ambiguous direction is input.
+  */
+-std::vector<lane_map::LaneRef> getLaneRefsInOrder(const lane_map::LaneGroupRef& lg_ref, const maps::LaneSubMap& map);
+-std::vector<lane_map::LaneRef> getLaneRefsInOrder(const lane_map::LaneGroup& lg);
+-std::vector<const lane_map::Lane*> getLanesInOrder(const lane_map::LaneGroup& lg);
++std::vector<lane_map::LaneRef> getLaneRefsLeftToRight(const lane_map::LaneGroupRef& lg_ref,
++                                                      const maps::LaneSubMap& map);
++std::vector<lane_map::LaneRef> getLaneRefsLeftToRight(const lane_map::LaneGroup& lg);
++std::vector<const lane_map::Lane*> getLanesLeftToRight(const lane_map::LaneGroup& lg);
++
++std::vector<lane_map::LaneRef> getLaneRefsRightToLeft(const lane_map::LaneGroupRef& lg_ref,
++                                                      const maps::LaneSubMap& map);
++std::vector<lane_map::LaneRef> getLaneRefsRightToLeft(const lane_map::LaneGroup& lg);
++std::vector<const lane_map::Lane*> getLanesRightToLeft(const lane_map::LaneGroup& lg);
+ 
+ /**
+  * Gets the lane refs next to us
+@@ -189,6 +201,8 @@ bool isOvertakingAllowed(const maps::LaneSubMap& map, const lane_map::LaneRef& l
+ 
+ bool isDrivingOnRightShoulderAllowed(const maps::LaneSubMap& map, const lane_map::LaneRef& lane_ref);
+ 
++bool isDrivingOnLeftShoulderAllowed(const maps::LaneSubMap& map, const lane_map::LaneRef& lane_ref);
++
+ void filterPolygonFeaturesByRoute(const std::string& route_id, lane_map::PolygonFeatureList* features);
+ 
+ BoostPolygon getNonEmergencyLaneGroupPerimeter(const maps::LaneSubMap& map, const lane_map::LaneGroupRef& lg_ref);
+@@ -236,6 +250,25 @@ void throwDataError(const lane_map::LaneRef& lane_ref, const std::string& error_
+ 
+ void throwDataError(const lane_map::LaneGroupRef& lg_ref, const std::string& error_msg);
+ 
++const lane_map::Junction* backwardJunction(const maps::LaneSubMap& map, const lane_map::LaneRef lr);
++
++const lane_map::Junction* forwardJunction(const maps::LaneSubMap& map, const lane_map::LaneRef lr);
++
++// Compute in route score based on the depth of successors in route. Each depth level is worth 10 points and max depth
++// is 3.
++int ComputeInRouteScore(const lane_map::LaneRef& start_lr,
++                        const std::unordered_set<lane_map::LaneGroupRef>& route_lane_groups,
++                        const maps::LaneSubMap& map);
++
++/**
++ * Creates a custom lane group from a free space path
++ *
++ * @param tile_id the id of the tile lg belongs to
++ * @param path the path to insert, vector of poses (x, y, theta)
++ * @return the lane group created from the path
++ */
++lane_map::LaneGroup createLaneGroupFromFreeSpacePath(const uint64_t tile_id, const std::vector<Eigen::Vector3d>& path);
++
+ } // namespace lane_map_utils
+ 
+ #endif // MAPS_MAP_UTILS_LANE_MAP_UTILS
+diff --git a/mapping/maps/include/maps/utils/map_frame_utils.h b/mapping/maps/include/maps/utils/map_frame_utils.h
+index e52c02a2e..d34ff58fd 100644
+--- a/mapping/maps/include/maps/utils/map_frame_utils.h
++++ b/mapping/maps/include/maps/utils/map_frame_utils.h
+@@ -64,6 +64,6 @@ map_utils::UtmZone utmZoneFromMapFrameMsg(const perception_msgs::MapFrame& msg);
+  **/
+ perception_msgs::MapFrame mapFrameMsgFromMapFrame(const MapFrame& map_frame);
+ 
+-}; // namespace maps
++};     // namespace maps
+ 
+ #endif // MAPS_UTILS_MAP_FRAME_UTILS_H_
+diff --git a/mapping/maps/include/maps/utils/terminal_map_utils.h b/mapping/maps/include/maps/utils/terminal_map_utils.h
+new file mode 100644
+index 000000000..2fba80317
+--- /dev/null
++++ b/mapping/maps/include/maps/utils/terminal_map_utils.h
+@@ -0,0 +1,79 @@
++#pragma once
++
++#include <perception_msgs/Localization.h>
++#include <perception_msgs/TerminalMap.h>
++#include <perception_msgs/TerminalParkingSpot.h>
++#include <ros/ros.h>
++
++#include <unordered_map>
++#include <vector>
++
++#include "maps/config.h"
++#include "maps/map_frame.h"
++#include "maps/zone.h"
++#include "utils/map/lane_map_structs.h"
++
++
++namespace maps {
++namespace terminal_map_utils {
++
++/**
++ * @brief Get the terminal parking boundaries for a given terminal.
++ *
++ * @param terminal_id The terminal ID.
++ * @param map_dir The directory where the terminal map is stored.
++ * @param localization The localization message.
++ * @param frame_convention The frame convention.
++ * @return std::unordered_map<std::string, lane_map::TerminalParkingSpot> The terminal parking boundaries.
++ */
++std::unordered_map<std::string, lane_map::TerminalParkingSpot> getTerminalParkingBoundaries(
++    const std::string& terminal_id, const std::string& map_dir, const perception_msgs::Localization& localization,
++    maps::MapFrameType frame_convention = MapFrameType::GCS_NED);
++
++/**
++ * @brief Get the terminal poles for a given terminal.
++ *
++ * @param terminal_id The terminal ID.
++ * @param map_dir The directory where the terminal map is stored.
++ * @param localization The localization message.
++ * @param frame_convention The frame convention.
++ * @return std::vector<lane_map::Pole> The terminal poles.
++ */
++std::vector<lane_map::Pole> getTerminalPoles(const std::string& terminal_id, const std::string& map_dir,
++                                             const perception_msgs::Localization& localization,
++                                             maps::MapFrameType frame_convention = MapFrameType::GCS_NED);
++
++/**
++ * @brief Get the terminal parking spot boundary lines for a given terminal.
++ *
++ * @param terminal_id The terminal ID.
++ * @param map_dir The directory where the terminal map is stored.
++ * @param localization The localization message.
++ * @param frame_convention The frame convention.
++ * @return std::unordered_map<uint64_t, lane_map::ParkingBoundary> The terminal poles.
++ */
++std::unordered_map<uint64_t, lane_map::ParkingSpotBoundary> getTerminalParkingSpotBoundaries(
++    const std::string& terminal_id, const std::string& map_dir, const perception_msgs::Localization& localization,
++    maps::MapFrameType frame_convention = MapFrameType::GCS_NED);
++
++/**
++ * @brief Get the terminal map for a given terminal.
++ *
++ * @param terminal_id The terminal ID.
++ * @param map_dir The directory where the terminal map is stored.
++ * @param localization The localization message.
++ * @param frame_convention The frame convention.
++ * @return lane_map::TerminalMap The terminal map.
++ */
++lane_map::TerminalMap getTerminalMap(const std::string& terminal_id, const std::string& map_dir,
++                                     const perception_msgs::Localization& localization,
++                                     maps::MapFrameType frame_convention = MapFrameType::GCS_NED);
++
++lane_map::TerminalMap getTerminalMap(const std::string& terminal_id, const std::string& map_dir, const double latitutde,
++                                     const double longitude,
++                                     maps::MapFrameType frame_convention = MapFrameType::GCS_NED);
++
++lane_map::TerminalMap buildTerminalMap(const perception_msgs::TerminalMap& terminal_map_msg);
++
++} // namespace terminal_map_utils
++} // namespace maps
+diff --git a/mapping/maps/nodes/route_generation_node.py b/mapping/maps/nodes/route_generation_node.py
+index b9a1411d7..12d078e45 100755
+--- a/mapping/maps/nodes/route_generation_node.py
++++ b/mapping/maps/nodes/route_generation_node.py
+@@ -1,21 +1,23 @@
+ #!/usr/bin/env python3
+ from builtins import str
+-from builtins import object
+ import os
+ import rospy
++from typing import Any, Dict, List, Tuple
++
++import geojson
+ 
+-from maps.geojson_tiled_map import GeoJsonTiledMapLayer
+ from maps.utils import routing_utils
+ from ros_map_utils import routing_msg_utils
+ 
+ import maps.routing
+-from perception_msgs.msg import MapTrip, MapRouteTravel
++from perception_msgs.msg import MapTrip, MapRouteTravel, MapParkingSpotRef
+ from std_msgs.msg import String
+ from basic_msgs.msg import Polygon64
+ from geometry_msgs.msg import Point
+ from diagnostics_utils.node_health_publisher import NodeHealthPublisher
+ import maps_py
+ 
++
+ class RouteGenerationNode:
+     def __init__(self):
+         """
+@@ -24,6 +26,8 @@ class RouteGenerationNode:
+ 
+         self.maps_dir = rospy.get_param("/maps/map_dir")
+         self.map_reader_dir = rospy.get_param("/maps/map_reader_dir")
++        self.lane_tile_dir = os.path.join(self.maps_dir, "tiles")
++        self.free_space_dir = rospy.get_param("/maps/free_space_dir")
+ 
+         self.loaded_tiles = {}
+ 
+@@ -48,6 +52,13 @@ class RouteGenerationNode:
+         # Full map for any routes we plan
+         self.here_maps = maps_py.HereMaps(self.maps_dir)
+ 
++        self.terminal_parking_handoff_offset = rospy.get_param(
++            "/terminal/parking_handoff_offset", 30.0
++        )
++        self.terminal_stop_line_offset = rospy.get_param(
++            "/terminal/stop_line_offset", 4.0
++        )
++
+     @staticmethod
+     def lane_groups(route_msg):
+         lgs = set()
+@@ -75,10 +86,21 @@ class RouteGenerationNode:
+             rospy.logerr(route_error)
+ 
+         route = None
++        origin_parking_spot_ref, destination_parking_spot_ref = None, None
+         if all_waypoints is not None:
++            origin_parking_spot_ref, destination_parking_spot_ref = (
++                self._read_terminal_metadata()
++            )
++            self._add_terminal_waypoint(
++                all_waypoints, origin_parking_spot_ref, is_inflow=False
++            )
++            self._add_terminal_waypoint(
++                all_waypoints, destination_parking_spot_ref, is_inflow=True
++            )
++
+             # find the route
+             route = maps.routing.find_route(
+-                os.path.join(self.maps_dir, "tiles"), all_waypoints, self.loaded_tiles
++                self.lane_tile_dir, all_waypoints, self.loaded_tiles
+             )
+ 
+             if route is None:
+@@ -88,8 +110,23 @@ class RouteGenerationNode:
+         # road_seg_refs = None
+         if route is not None:
+             route_ok = True
++
++            # add stop line waypoints to all_waypoints
++            all_waypoints = self._add_stop_line_waypoints(all_waypoints, route[0])
++
++            # add heading to all waypoints
++            self._add_waypoint_heading(all_waypoints)
++
+             route_msg = routing_msg_utils.trip_to_msg(route, all_waypoints)
+             route_msg.route_id = route_id.data
++            route_msg.origin_parking_spot = origin_parking_spot_ref
++            route_msg.destination_parking_spot = destination_parking_spot_ref
++            self._add_parking_spot_waypoint(
++                route_msg, origin_parking_spot_ref, is_origin=True
++            )
++            self._add_parking_spot_waypoint(
++                route_msg, destination_parking_spot_ref, is_origin=False
++            )
+ 
+             # Figure out detailed travel information about the route
+             # Lazy loading of tiles in the route (takes a while)
+@@ -117,8 +154,9 @@ class RouteGenerationNode:
+                 mrt.lane_ref.lane_group_id = lr.lg_id
+                 mrt.lane_ref.tile_id = lr.tile_id
+                 mrt.distance_to_deviation = travel.distance_to_deviation
+-                mrt.distance_until_next_transition =\
++                mrt.distance_until_next_transition = (
+                     travel_until_transition_by_lane_ref[lr].distance_to_deviation
++                )
+ 
+                 route_msg.route_travel.append(mrt)
+ 
+@@ -136,6 +174,183 @@ class RouteGenerationNode:
+             error_message=route_error,
+         )
+ 
++    def _read_terminal_metadata(self) -> Tuple[MapParkingSpotRef, MapParkingSpotRef]:
++        origin_ref = MapParkingSpotRef(
++            terminal_id=rospy.get_param("origin_terminal_id", ""),
++            id=rospy.get_param("origin_parking_spot_id", ""),
++        )
++        destination_ref = MapParkingSpotRef(
++            terminal_id=rospy.get_param("destination_terminal_id", ""),
++            id=rospy.get_param("destination_parking_spot_id", ""),
++        )
++        return origin_ref, destination_ref
++
++    def _add_terminal_waypoint(
++        self,
++        waypoints: List[geojson.Feature],
++        park_spot_ref: MapParkingSpotRef,
++        is_inflow: bool,
++    ):
++        waypoint_type = "destination" if is_inflow else "origin"
++        terminal_id = park_spot_ref.terminal_id
++        parking_spot_id = park_spot_ref.id
++        if terminal_id == "" or parking_spot_id == "":
++            rospy.loginfo(
++                f"No terminal or parking spot specified for {waypoint_type} waypoint"
++            )
++            return
++
++        # Load parking spot feature from free space directory
++        parking_spot = routing_utils.load_parking_spot(
++            self.free_space_dir, terminal_id, parking_spot_id
++        )
++        if parking_spot is None:
++            rospy.logerr(
++                f"Unable to load {waypoint_type} parking spot for terminal_id {terminal_id}, parking_spot_id {parking_spot_id}"
++            )
++            return
++
++        point = parking_spot["geometry"]["coordinates"]
++        offset = (
++            self.terminal_parking_handoff_offset * -1
++            if is_inflow
++            else self.terminal_parking_handoff_offset
++        )
++        lg_id_key = "inflow_lane_group_ids" if is_inflow else "outflow_lane_group_ids"
++        lg_id = parking_spot["properties"][lg_id_key][
++            0
++        ]  # only consider the first lane group
++
++        new_waypoint = maps.routing.find_projection_with_offset(
++            point, offset, lg_id, self.lane_tile_dir, self.loaded_tiles
++        )
++        if new_waypoint is None:
++            rospy.logerr(
++                f"Unable to find {waypoint_type} waypoint projection for point {point} with lg_id {lg_id}"
++            )
++            return
++
++        # Vehicle needs to be stopped at handoff points between planners
++        new_waypoint.properties["speed"] = 0.0
++        if is_inflow:
++            new_waypoint.properties["waypoint_type"] = "parking_inflow"
++            waypoints.append(new_waypoint)
++        else:
++            new_waypoint.properties["waypoint_type"] = "parking_outflow"
++            waypoints.insert(0, new_waypoint)
++        for i, wp in enumerate(waypoints):
++            wp.ref = i
++        rospy.loginfo(
++            f"Successfully added {waypoint_type} terminal waypoint: {new_waypoint}"
++        )
++
++    def _add_waypoint_heading(self, waypoints: List[geojson.Feature]):
++        for waypoint in waypoints:
++            heading = maps.routing.get_waypoint_heading(
++                waypoint, self.loaded_tiles, self.lane_tile_dir
++            )
++            if heading is None:
++                rospy.logerr(f"Unable to get heading for waypoint {waypoint}")
++                waypoint.properties["heading"] = 0.0
++            else:
++                waypoint.properties["heading"] = heading
++
++    def _add_stop_line_waypoints(
++        self, waypoints: List[geojson.Feature], route_lg_refs: List[Dict[str, Any]]
++    ) -> List[geojson.Feature]:
++        # Get waypoints containing stop lines
++        new_waypoints = routing_utils.get_waypoints_with_stop_line(
++            self.loaded_tiles,
++            self.lane_tile_dir,
++            self.free_space_dir,
++            waypoints,
++            route_lg_refs,
++        )
++
++        # Project stop line waypoints forward so that ego stops close to the actual stop line
++        for i in range(len(new_waypoints)):
++            wp = new_waypoints[i]
++            if wp.properties["waypoint_type"] == "stop_line":
++                projected_stop_line_wp = maps.routing.find_projection_with_offset(
++                    wp.geometry["coordinates"],
++                    self.terminal_stop_line_offset,
++                    wp.properties["lane_group_id"],
++                    self.lane_tile_dir,
++                    self.loaded_tiles,
++                )
++                if projected_stop_line_wp is None:
++                    rospy.logerr(
++                        f"Unable to project stop line waypoint {wp} with offset {self.terminal_stop_line_offset}"
++                    )
++                    continue
++                new_waypoints[i].geometry = projected_stop_line_wp.geometry
++                rospy.loginfo(
++                    f"Successfully added stop_line terminal waypoint: {new_waypoints[i]}"
++                )
++
++        return new_waypoints
++
++    def _add_stop_line_waypoints(
++        self, waypoints: List[geojson.Feature], route_lg_refs: List[Dict[str, Any]]
++    ) -> List[geojson.Feature]:
++        # Get waypoints containing stop lines
++        new_waypoints = routing_utils.get_waypoints_with_stop_line(
++            self.loaded_tiles,
++            self.lane_tile_dir,
++            self.free_space_dir,
++            waypoints,
++            route_lg_refs,
++        )
++
++        # Project stop line waypoints forward so that ego stops close to the actual stop line
++        for i in range(len(new_waypoints)):
++            wp = new_waypoints[i]
++            if wp.properties["waypoint_type"] == "stop_line":
++                projected_stop_line_wp = maps.routing.find_projection_with_offset(
++                    wp.geometry["coordinates"],
++                    self.terminal_stop_line_offset,
++                    wp.properties["lane_group_id"],
++                    self.lane_tile_dir,
++                    self.loaded_tiles,
++                )
++                if projected_stop_line_wp is None:
++                    rospy.logerr(
++                        f"Unable to project stop line waypoint {wp} with offset {self.terminal_stop_line_offset}"
++                    )
++                    continue
++                new_waypoints[i].geometry = projected_stop_line_wp.geometry
++                rospy.loginfo(
++                    f"Successfully added stop_line terminal waypoint: {new_waypoints[i]}"
++                )
++
++        return new_waypoints
++
++    def _add_parking_spot_waypoint(
++        self, route_msg: MapTrip, parking_spot_ref: MapParkingSpotRef, is_origin: bool
++    ):
++        if parking_spot_ref.terminal_id != "" and parking_spot_ref.id != "":
++            parking_spot = routing_utils.load_parking_spot(
++                self.free_space_dir, parking_spot_ref.terminal_id, parking_spot_ref.id
++            )
++            if parking_spot is None:
++                rospy.logerr(
++                    f"Unable to load parking spot for terminal_id {parking_spot_ref.terminal_id}, parking_spot_id {parking_spot_ref.id}"
++                )
++                return
++
++            parking_spot_wp = routing_msg_utils.parking_spot_to_waypoint_msg(
++                parking_spot
++            )
++            if is_origin:
++                route_msg.waypoints.insert(0, parking_spot_wp)
++            else:
++                route_msg.waypoints.append(parking_spot_wp)
++            for i, wp in enumerate(route_msg.waypoints):
++                wp.id = i
++            rospy.loginfo(
++                f"Added parking spot waypoint for terminal_id {parking_spot_ref.terminal_id}, parking_spot_id {parking_spot_ref.id}"
++            )
++
+ 
+ if __name__ == "__main__":
+     rospy.init_node("route_publisher")
+diff --git a/mapping/maps/src/maps/lane_map.cpp b/mapping/maps/src/maps/lane_map.cpp
+index 022d4a0a8..7f9cfee6c 100644
+--- a/mapping/maps/src/maps/lane_map.cpp
++++ b/mapping/maps/src/maps/lane_map.cpp
+@@ -11,6 +11,8 @@ LaneMap::LaneMap(std::string map_dir, size_t tile_radius, bool preload, MapFrame
+   , preload_(preload)
+ {
+   const std::string tile_dir = map_dir_ + "/tiles";
++  // The ROS_ASSERT_MSG macro doesnt actually print out the file for some reason so we do it manually
++  std::cerr << "Tile_dir: " << tile_dir << std::endl;
+   ROS_ASSERT_MSG(utils_file::fileExists(tile_dir), "%s", tile_dir.c_str());
+   ROS_ASSERT_MSG(utils_file::isDir(tile_dir), "%s", tile_dir.c_str());
+ }
+@@ -259,4 +261,4 @@ void LaneMap::runPreloadThread()
+   }
+ }
+ 
+-} // namespace maps
+\ No newline at end of file
++} // namespace maps
+diff --git a/mapping/maps/src/maps/lane_routing.cpp b/mapping/maps/src/maps/lane_routing.cpp
+index 04908714f..1dac0a12b 100644
+--- a/mapping/maps/src/maps/lane_routing.cpp
++++ b/mapping/maps/src/maps/lane_routing.cpp
+@@ -122,7 +122,7 @@ laneRouteTravel(const maps::LaneSubMap& map, const std::unordered_set<lane_map::
+   std::unordered_map<lane_map::LaneRef, RouteTravel> result;
+   result.reserve(route_lane_groups.size() * 4); // Assume about 4 lane refs per group
+ 
+-  std::stack<lane_map::LaneRef> stack; // Used for DFS
++  std::stack<lane_map::LaneRef> stack;          // Used for DFS
+ 
+   // Set up distance-to-go
+   // Any lane that does not lead onto the route will get a distance-to-go = 0.0 (base case)
+@@ -156,7 +156,9 @@ laneRouteTravel(const maps::LaneSubMap& map, const std::unordered_set<lane_map::
+     const lane_map::Lane* lane = map.getLane(child_lr);
+     assert(lane != nullptr);
+ 
+-    const double travel_dist = laneTravelDistance(*lane);
++    const lane_map::LaneGroupRef lg_ref = child_lr.getLaneGroupRef();
++    const lane_map::LaneGroup* lg = map.getLaneGroup(lg_ref);
++    const double travel_dist = lg->length;
+ 
+     // Previous lanes on route
+     const lane_map::Junction* junct = map.getJunction(lane->start_junction_ref);
+@@ -189,7 +191,7 @@ travelUntilTransition(const maps::LaneSubMap& map, const std::unordered_set<lane
+   std::unordered_map<lane_map::LaneRef, RouteTravel> result;
+   result.reserve(route_lane_groups.size() * 4); // Assume about 4 lane refs per group
+ 
+-  std::stack<lane_map::LaneRef> stack; // Used for DFS
++  std::stack<lane_map::LaneRef> stack;          // Used for DFS
+ 
+   // Set up distance-to-go
+   // Any lane that does not lead onto the route will get a distance-to-go = 0.0 (base case)
+@@ -212,6 +214,7 @@ travelUntilTransition(const maps::LaneSubMap& map, const std::unordered_set<lane
+       }
+     }
+   }
++
+   // Traverse backwards
+   while (!stack.empty()) {
+     const lane_map::LaneRef child_lr = stack.top();
+@@ -220,7 +223,9 @@ travelUntilTransition(const maps::LaneSubMap& map, const std::unordered_set<lane
+     const lane_map::Lane* lane = map.getLane(child_lr);
+     assert(lane != nullptr);
+ 
+-    const double travel_dist = laneTravelDistance(*lane);
++    const lane_map::LaneGroupRef lg_ref = child_lr.getLaneGroupRef();
++    const lane_map::LaneGroup* lg = map.getLaneGroup(lg_ref);
++    const double travel_dist = lg->length;
+ 
+     // This preferes route and non-transition...
+     // TODO replace this to make it less obscure, but I'm pretty sure this works.
+diff --git a/mapping/maps/src/maps/lane_sub_map.cpp b/mapping/maps/src/maps/lane_sub_map.cpp
+index ee0a3d385..55afa7f20 100644
+--- a/mapping/maps/src/maps/lane_sub_map.cpp
++++ b/mapping/maps/src/maps/lane_sub_map.cpp
+@@ -5,6 +5,9 @@
+ #include <utils/map/lane_map_parser.h>
+ 
+ #include "maps/utils/lane_map_transform.h"
++#include "maps/utils/lane_map_utils.h"
++
++
+ namespace maps {
+ 
+ LaneSubMap::LaneSubMap(const MapFrameType frame_type)
+@@ -190,4 +193,18 @@ void LaneSubMap::markMissingTile(uint64_t tile_id)
+   missing_tiles_.insert(tile_id);
+ }
+ 
++std::optional<lane_map::LaneGroupRef> LaneSubMap::insertFreeSpacePath(const std::vector<Eigen::Vector3d>& path)
++{
++  const uint64_t tile_id = map_utils::latLngToTileId(map_frame_.origin_latitude, map_frame_.origin_longitude);
++  std::shared_ptr<LaneSubMap::MapTileType> tile = getTile(tile_id);
++  if (!tile) {
++    std::cerr << "Tile " << tile_id << " of map frame origin does not exist in the map" << std::endl;
++    return std::nullopt;
++  }
++
++  const lane_map::LaneGroup lg = lane_map_utils::createLaneGroupFromFreeSpacePath(tile_id, path);
++  tile->lane_groups.insert({ lg.ref, lg });
++  return lg.ref;
++}
++
+ } // namespace maps
+diff --git a/mapping/maps/src/maps/routing.cpp b/mapping/maps/src/maps/routing.cpp
+index c91203fb2..f106f7b2b 100644
+--- a/mapping/maps/src/maps/routing.cpp
++++ b/mapping/maps/src/maps/routing.cpp
+@@ -191,6 +191,14 @@ uint8_t toMapWaypointType(const std::string& waypoint_type)
+     return perception_msgs::MapWaypoint::WAYPOINT_SUB_ORIGIN;
+   } else if (waypoint_type == "allowed_ramp") {
+     return perception_msgs::MapWaypoint::WAYPOINT_ALLOWED_RAMP;
++  } else if (waypoint_type == "parking_inflow") {
++    return perception_msgs::MapWaypoint::WAYPOINT_PARKING_INFLOW;
++  } else if (waypoint_type == "parking_outflow") {
++    return perception_msgs::MapWaypoint::WAYPOINT_PARKING_OUTFLOW;
++  } else if (waypoint_type == "parking_spot") {
++    return perception_msgs::MapWaypoint::WAYPOINT_PARKING_SPOT;
++  } else if (waypoint_type == "stop_line") {
++    return perception_msgs::MapWaypoint::WAYPOINT_STOP_LINE;
+   }
+   throw std::runtime_error("unknown waypoint type: " + waypoint_type);
+ }
+diff --git a/mapping/maps/src/maps/tiled_zone_atlas.cpp b/mapping/maps/src/maps/tiled_zone_atlas.cpp
+index 54877f012..c508e43a7 100644
+--- a/mapping/maps/src/maps/tiled_zone_atlas.cpp
++++ b/mapping/maps/src/maps/tiled_zone_atlas.cpp
+@@ -34,4 +34,4 @@ TiledZoneAtlas createZoneAtlas(const std::string& directory_path, MapFrameType f
+   return atlas;
+ }
+ 
+-} // namespace maps
+\ No newline at end of file
++} // namespace maps
+diff --git a/mapping/maps/src/maps/tiled_zone_map.cpp b/mapping/maps/src/maps/tiled_zone_map.cpp
+index ce1c4068c..9825b2df9 100644
+--- a/mapping/maps/src/maps/tiled_zone_map.cpp
++++ b/mapping/maps/src/maps/tiled_zone_map.cpp
+@@ -25,6 +25,7 @@ const std::unordered_map<MapZoneType, std::string> ZONE_PATHS{
+   { MapZoneType::SHIFT_ZONES, "/shift_zones/shift_zones.json" },
+   { MapZoneType::HIGH_CURVATURE_ZONES, "/high_curvature_zones/high_curvature_zones.json" },
+   { MapZoneType::AGGRESSIVE_STEER_ZONES, "/aggressive_steer_zones/aggressive_steer_zones.json" },
++  { MapZoneType::TERMINAL_AREA_ZONES, "/free_space/terminals/all_terminals.json" },
+   { MapZoneType::TELEOP, "/free_space/series_d_demo.teleop.json" }
+ };
+ 
+@@ -50,7 +51,10 @@ TiledZoneMap::TiledZoneMap(const std::string& file_path, const maps::MapFrameTyp
+   // Read the file
+   Json::Value root;
+   const bool read_file = utils_json::readJsonFile(file_path, &root);
+-  assert(read_file);
++  if (!read_file) {
++    ROS_WARN_STREAM("Failed to read zone map file: " << file_path);
++    return;
++  }
+   // Load in the features
+   const auto feats = lane_map::parsePolygonFeatures(root, use_ned);
+   // Convert zones into tiled structure for fast access:
+diff --git a/mapping/maps/src/maps/utils/ego_lane_finder.cpp b/mapping/maps/src/maps/utils/ego_lane_finder.cpp
+index 31201aab8..4bc0b21e7 100644
+--- a/mapping/maps/src/maps/utils/ego_lane_finder.cpp
++++ b/mapping/maps/src/maps/utils/ego_lane_finder.cpp
+@@ -10,6 +10,7 @@
+ #include <boost/geometry/strategies/strategies.hpp>
+ 
+ #include "lane_map_utils.h"
++#include "utils/ros/params.h"
+ 
+ namespace ego_lane_finder {
+ 
+@@ -36,6 +37,7 @@ struct LanePriority
+   lane_map::LaneGroupRef lane_group_ref;
+   bool is_ramp;
+   std::map<lane_map::LaneTransitionType, size_t> transition_priority;
++  int in_route_score = 0;
+ 
+   bool operator<(const LanePriority& other) const
+   {
+@@ -45,6 +47,12 @@ struct LanePriority
+     if (is_ramp > other.is_ramp)
+       return false;
+ 
++    // Prefer lanes with successors in the route
++    if (in_route_score > other.in_route_score)
++      return true;
++    if (in_route_score < other.in_route_score)
++      return false;
++
+     // Sort by transition priority
+     if (transition_priority.at(lane_transition_type) < other.transition_priority.at(other.lane_transition_type))
+       return true;
+@@ -59,11 +67,21 @@ struct LanePriority
+         std::tie(other.lane_group_ref.tile_id, other.lane_group_ref.id))
+       return false;
+ 
+-    // Sort by lane order (left to right)
+-    if (lane_order < other.lane_order)
+-      return true;
+-    if (lane_order > other.lane_order)
+-      return false;
++    bool enable_left_hand_drive(false);
++    ros::param::get("enable_left_hand_drive", enable_left_hand_drive);
++    if (!enable_left_hand_drive) {
++      // Sort by lane order (left to right)
++      if (lane_order < other.lane_order)
++        return true;
++      if (lane_order > other.lane_order)
++        return false;
++    } else {
++      // Sort by lane order (right to left)
++      if (lane_order > other.lane_order)
++        return true;
++      if (lane_order < other.lane_order)
++        return false;
++    }
+ 
+     return false;
+   }
+@@ -74,6 +92,7 @@ struct LanePriority
+     // Note(jared) I have no idea why this is, I didn't write it lol
+     return (is_ramp == other.is_ramp && lane_transition_type == other.lane_transition_type);
+   }
++
+   bool operator!=(const LanePriority& other) const
+   {
+     return !(*this == other);
+@@ -88,7 +107,8 @@ struct LanePriority
+  */
+ std::vector<lane_map::LaneRef> getNominalLanes(const maps::LaneSubMap& map,
+                                                const std::unordered_set<lane_map::LaneRef>& candidate_lanes,
+-                                               const lane_map_utils::TraverseDirection direction)
++                                               const lane_map_utils::TraverseDirection direction,
++                                               const std::unordered_set<lane_map::LaneGroupRef>& route_lane_groups)
+ {
+   assert(direction == lane_map_utils::TraverseDirection::IN || direction == lane_map_utils::TraverseDirection::OUT);
+ 
+@@ -113,8 +133,13 @@ std::vector<lane_map::LaneRef> getNominalLanes(const maps::LaneSubMap& map,
+       continue;
+     }
+ 
++    int in_route_score = 0;
++    if (!route_lane_groups.empty()) {
++      in_route_score = lane_map_utils::ComputeInRouteScore(lane_ref, route_lane_groups, map);
++    }
++
+     const LanePriority priority = { lane_ref,    lane->lane_transition_type, lane->lane_order, lg_ref,
+-                                    lg->is_ramp, transition_priority };
++                                    lg->is_ramp, transition_priority,        in_route_score };
+     lane_priorities.push_back(std::move(priority));
+   }
+ 
+@@ -165,7 +190,7 @@ std::vector<lane_map::LaneRef> getEgoLanes(const maps::LaneSubMap& map,
+     std::copy_if(filtered_lanes.begin(), filtered_lanes.end(), std::inserter(candidate_lanes, candidate_lanes.begin()),
+                  [&](const lane_map::LaneRef& ref) { return route_lane_groups.count(ref.getLaneGroupRef()) > 0; });
+   }
+-  return getNominalLanes(map, candidate_lanes, lane_map_utils::TraverseDirection::OUT);
++  return getNominalLanes(map, candidate_lanes, lane_map_utils::TraverseDirection::OUT, route_lane_groups);
+ }
+ 
+ std::unordered_set<lane_map::LaneRef> associateLanes(const maps::LaneSubMap& map, const geometry_msgs::Point& object)
+@@ -192,7 +217,7 @@ std::unordered_set<lane_map::LaneRef> associateLanes(const maps::LaneSubMap& map
+       // lane group not found
+       continue;
+     }
+-    const auto lanes = lane_map_utils::getLanesInOrder(*lg);
++    const auto lanes = lane_map_utils::getLanesLeftToRight(*lg);
+     for (const auto& lane : lanes) {
+       const auto* const left_boundary = map.getBoundary(lane->left_boundary_ref);
+       const auto* const right_boundary = map.getBoundary(lane->right_boundary_ref);
+diff --git a/mapping/maps/src/maps/utils/lane_map_msg_parser.cpp b/mapping/maps/src/maps/utils/lane_map_msg_parser.cpp
+index 9a1819130..d74dcffa4 100644
+--- a/mapping/maps/src/maps/utils/lane_map_msg_parser.cpp
++++ b/mapping/maps/src/maps/utils/lane_map_msg_parser.cpp
+@@ -84,6 +84,7 @@ LaneGroup getLaneGroupStruct(const perception_msgs::MapLaneGroup& lane_group_msg
+     lane_group.boundaries[boundary.ref] = boundary;
+   }
+   lane_group.is_right_shoulder_undrivable = lane_group_msg.is_right_shoulder_undrivable;
++  lane_group.is_left_shoulder_undrivable = lane_group_msg.is_left_shoulder_undrivable;
+ 
+   lane_group.length = lane_group_msg.length;
+   lane_group.functional_class = lane_group_msg.functional_class;
+diff --git a/mapping/maps/src/maps/utils/lane_map_msg_utils.cpp b/mapping/maps/src/maps/utils/lane_map_msg_utils.cpp
+index f30841cc6..c89f26f43 100644
+--- a/mapping/maps/src/maps/utils/lane_map_msg_utils.cpp
++++ b/mapping/maps/src/maps/utils/lane_map_msg_utils.cpp
+@@ -60,6 +60,7 @@ perception_msgs::MapLaneGroup getLaneGroupMsg(const lane_map::LaneGroup& lane_gr
+     lg_msg.boundaries.push_back(getBoundaryMsg(boundary_it.second));
+   }
+   lg_msg.is_right_shoulder_undrivable = lane_group.is_right_shoulder_undrivable;
++  lg_msg.is_left_shoulder_undrivable = lane_group.is_left_shoulder_undrivable;
+ 
+   lg_msg.functional_class = lane_group.functional_class;
+   lg_msg.route_type = lane_group.route_type;
+diff --git a/mapping/maps/src/maps/utils/lane_map_utils.cpp b/mapping/maps/src/maps/utils/lane_map_utils.cpp
+index 5789c593d..276e5e45a 100644
+--- a/mapping/maps/src/maps/utils/lane_map_utils.cpp
++++ b/mapping/maps/src/maps/utils/lane_map_utils.cpp
+@@ -1,5 +1,6 @@
+ #include "lane_map_utils.h"
+ 
++#include <geometry_msgs/Point.h>
+ #include <utils/geometric/polyline.h>
+ #include <utils/sets/set_utils.h>
+ 
+@@ -9,6 +10,7 @@
+ #include <boost/geometry/strategies/strategies.hpp>
+ #include <boost/range/adaptor/map.hpp>
+ #include <boost/range/join.hpp>
++#include <cstdint>
+ #include <functional>
+ #include <sstream>
+ #include <stack>
+@@ -24,6 +26,7 @@ using lane_map::LaneGroup;
+ using lane_map::LaneGroupRef;
+ using lane_map::LaneRef;
+ 
++
+ namespace lane_map_utils {
+ 
+ LaneRef createLaneRefFromLaneGroupRef(const LaneGroupRef& lg_ref, uint8_t lane_id)
+@@ -104,16 +107,16 @@ std::unordered_set<LaneGroupRef> getConnectedLaneGroups(const maps::LaneSubMap&
+ 
+   return {};
+ }
+-std::vector<LaneRef> getLaneRefsInOrder(const LaneGroupRef& lg_ref, const maps::LaneSubMap& map)
++std::vector<LaneRef> getLaneRefsLeftToRight(const LaneGroupRef& lg_ref, const maps::LaneSubMap& map)
+ {
+   const lane_map::LaneGroup* lane_group = map.getLaneGroup(lg_ref);
+   assert(lane_group != nullptr);
+ 
+-  return getLaneRefsInOrder(*lane_group);
++  return getLaneRefsLeftToRight(*lane_group);
+ }
+-std::vector<LaneRef> getLaneRefsInOrder(const LaneGroup& lg)
++std::vector<LaneRef> getLaneRefsLeftToRight(const LaneGroup& lg)
+ {
+-  const std::vector<const Lane*> lanes_in_order = getLanesInOrder(lg);
++  const std::vector<const Lane*> lanes_in_order = getLanesLeftToRight(lg);
+ 
+   std::for_each(lanes_in_order.begin(), lanes_in_order.end(), [](const Lane* lane) { assert(lane != nullptr); });
+ 
+@@ -126,7 +129,7 @@ std::vector<LaneRef> getLaneRefsInOrder(const LaneGroup& lg)
+   return lane_refs_in_order;
+ }
+ 
+-std::vector<const Lane*> getLanesInOrder(const LaneGroup& lg)
++std::vector<const Lane*> getLanesLeftToRight(const LaneGroup& lg)
+ {
+   if (!isDirectionalLaneGroup(lg)) {
+     return {};
+@@ -146,6 +149,27 @@ std::vector<const Lane*> getLanesInOrder(const LaneGroup& lg)
+   return non_emergency_lanes;
+ }
+ 
++std::vector<lane_map::LaneRef> getLaneRefsRightToLeft(const lane_map::LaneGroupRef& lg_ref, const maps::LaneSubMap& map)
++{
++  std::vector<lane_map::LaneRef> left_to_right_lanes = getLaneRefsLeftToRight(lg_ref, map);
++  std::reverse(left_to_right_lanes.begin(), left_to_right_lanes.end());
++  return left_to_right_lanes;
++}
++
++std::vector<lane_map::LaneRef> getLaneRefsRightToLeft(const lane_map::LaneGroup& lg)
++{
++  std::vector<lane_map::LaneRef> left_to_right_lanes = getLaneRefsLeftToRight(lg);
++  std::reverse(left_to_right_lanes.begin(), left_to_right_lanes.end());
++  return left_to_right_lanes;
++}
++
++std::vector<const lane_map::Lane*> getLanesRightToLeft(const lane_map::LaneGroup& lg)
++{
++  std::vector<const lane_map::Lane*> left_to_right_lanes = getLanesLeftToRight(lg);
++  std::reverse(left_to_right_lanes.begin(), left_to_right_lanes.end());
++  return left_to_right_lanes;
++}
++
+ std::unordered_map<basic_types::RelativeDirection, LaneRef> adjacentLaneRefs(const LaneRef& lane_ref,
+                                                                              const LaneGroup& lg)
+ {
+@@ -208,7 +232,7 @@ std::vector<LaneRef> getLanesToLeft(const maps::LaneSubMap& map, const LaneRef&
+     return {};
+   }
+ 
+-  const std::vector<const Lane*> left_to_right_lanes = getLanesInOrder(*lg);
++  const std::vector<const Lane*> left_to_right_lanes = getLanesLeftToRight(*lg);
+   for (const auto i_lane : left_to_right_lanes) {
+     if (i_lane->ref == lane_ref) {
+       // stop when we hit lane_ref
+@@ -230,7 +254,7 @@ std::vector<LaneRef> getLanesToRight(const maps::LaneSubMap& map, const LaneRef&
+     return {};
+   }
+ 
+-  const std::vector<const Lane*> left_to_right_lanes = getLanesInOrder(*lg);
++  const std::vector<const Lane*> left_to_right_lanes = getLanesLeftToRight(*lg);
+   bool seen_lane_ref = false;
+   for (const auto i_lane : left_to_right_lanes) {
+     if (i_lane->ref == lane_ref) {
+@@ -246,7 +270,7 @@ std::vector<LaneRef> getLanesToRight(const maps::LaneSubMap& map, const LaneRef&
+ boost::optional<lane_map::LaneRef> getLaneToLeft(const lane_map::LaneRef& lane_ref,
+                                                  const lane_map::LaneGroup& lane_group)
+ {
+-  std::vector<lane_map::LaneRef> lane_refs = getLaneRefsInOrder(lane_group);
++  std::vector<lane_map::LaneRef> lane_refs = getLaneRefsLeftToRight(lane_group);
+   auto it = std::find(lane_refs.begin(), lane_refs.end(), lane_ref);
+   if (it == lane_refs.end() || it == lane_refs.begin()) {
+     return boost::none;
+@@ -256,7 +280,7 @@ boost::optional<lane_map::LaneRef> getLaneToLeft(const lane_map::LaneRef& lane_r
+ 
+ boost::optional<lane_map::LaneRef> getLaneToRight(const lane_map::LaneRef& lane_ref, const LaneGroup& lane_group)
+ {
+-  std::vector<lane_map::LaneRef> lane_refs = getLaneRefsInOrder(lane_group);
++  std::vector<lane_map::LaneRef> lane_refs = getLaneRefsLeftToRight(lane_group);
+   auto it = std::find(lane_refs.begin(), lane_refs.end(), lane_ref);
+   if (it == lane_refs.end() || std::next(it) == lane_refs.end()) {
+     return boost::none;
+@@ -388,7 +412,6 @@ bool isOvertakingAllowed(const maps::LaneSubMap& map, const LaneRef& lane_ref)
+   return !lane->is_no_passing_zone;
+ }
+ 
+-
+ bool isDrivingOnRightShoulderAllowed(const maps::LaneSubMap& map, const LaneRef& lane_ref)
+ {
+   const LaneGroupRef& lg_ref = lane_ref.getLaneGroupRef();
+@@ -400,6 +423,16 @@ bool isDrivingOnRightShoulderAllowed(const maps::LaneSubMap& map, const LaneRef&
+   return !lg->is_right_shoulder_undrivable;
+ }
+ 
++bool isDrivingOnLeftShoulderAllowed(const maps::LaneSubMap& map, const LaneRef& lane_ref)
++{
++  const LaneGroupRef& lg_ref = lane_ref.getLaneGroupRef();
++  const LaneGroup* lg = map.getLaneGroup(lg_ref);
++  if (!lg) {
++    throwDataError(lg_ref, "Given lane group does not exist");
++  }
++
++  return !lg->is_left_shoulder_undrivable;
++}
+ 
+ BoostPolygon getNonEmergencyLaneGroupPerimeter(const maps::LaneSubMap& map, const LaneGroupRef& lg_ref)
+ {
+@@ -409,7 +442,7 @@ BoostPolygon getNonEmergencyLaneGroupPerimeter(const maps::LaneSubMap& map, cons
+   }
+ 
+   // Extract left boundary of left most lane, and right boundary of right most lane:
+-  std::vector<const Lane*> in_order = getLanesInOrder(*lg);
++  std::vector<const Lane*> in_order = getLanesLeftToRight(*lg);
+   assert(!in_order.empty());
+   const Lane* l_lane = in_order.front();
+   const Lane* r_lane = in_order.back();
+@@ -461,7 +494,7 @@ std::vector<geometry_msgs::Point> getNonEmergencyLeftLaneGroupBoundary(const map
+   }
+ 
+   // Extract left boundary of left most lane:
+-  const std::vector<const Lane*> in_order = getLanesInOrder(*lg);
++  const std::vector<const Lane*> in_order = getLanesLeftToRight(*lg);
+   assert(!in_order.empty());
+   const Lane* l_lane = in_order.front();
+   if (!l_lane) {
+@@ -484,7 +517,7 @@ std::vector<geometry_msgs::Point> getNonEmergencyRightLaneGroupBoundary(const ma
+   }
+ 
+   // Extract right boundary of right most lane:
+-  const std::vector<const Lane*> in_order = getLanesInOrder(*lg);
++  const std::vector<const Lane*> in_order = getLanesLeftToRight(*lg);
+   assert(!in_order.empty());
+ 
+   const Lane* r_lane = in_order.back();
+@@ -664,5 +697,112 @@ void throwDataError(const LaneGroupRef& lg_ref, const std::string& error_msg)
+   throw MapDataError(ss.str());
+ }
+ 
++const lane_map::Junction* backwardJunction(const maps::LaneSubMap& map, const lane_map::LaneRef lr)
++{
++  const lane_map::Lane* lane = map.getLane(lr);
++  if (lane == nullptr)
++    return nullptr;
++  const lane_map::Junction* junct = map.getJunction(lane->start_junction_ref);
++  return junct; // can be nullptr;
++}
++
++const lane_map::Junction* forwardJunction(const maps::LaneSubMap& map, const lane_map::LaneRef lr)
++{
++  const lane_map::Lane* lane = map.getLane(lr);
++  if (lane == nullptr)
++    return nullptr;
++  const lane_map::Junction* junct = map.getJunction(lane->end_junction_ref);
++  return junct; // can be nullptr;
++}
++
++int ComputeInRouteScore(const lane_map::LaneRef& start_lr,
++                        const std::unordered_set<lane_map::LaneGroupRef>& route_lane_groups,
++                        const maps::LaneSubMap& map)
++{
++  int in_route_score = 0;
++  std::unordered_set<lane_map::LaneRef> lr_at_depth;
++
++  // Initialize the set with the current lane ref if it is in the route
++  if (route_lane_groups.count(start_lr.getLaneGroupRef()) > 0) {
++    lr_at_depth.insert(start_lr);
++  }
++
++  for (int i = 0; i < kInRouteScoreSearchDepth; i++) {
++    if (lr_at_depth.empty()) {
++      break;
++    }
++    in_route_score += kRouteScoreIncrement;
++    std::unordered_set<lane_map::LaneRef> next_lr_at_depth;
++    for (const auto& lr : lr_at_depth) {
++      const auto* junct = forwardJunction(map, lr);
++      if (junct != nullptr) {
++        for (const auto& outflow_lr : junct->outflow_refs) {
++          if (route_lane_groups.count(outflow_lr.getLaneGroupRef()) > 0) {
++            next_lr_at_depth.insert(outflow_lr);
++          }
++        }
++      }
++    }
++    lr_at_depth = next_lr_at_depth;
++  }
++  return in_route_score;
++}
++
++LaneGroup createLaneGroupFromFreeSpacePath(const uint64_t tile_id, const std::vector<Eigen::Vector3d>& path)
++{
++  BoundaryRef left_boundary_ref(tile_id, kFreeSpacePathLgId, 1);
++  Boundary left_boundary;
++  left_boundary.ref = left_boundary_ref;
++  BoundaryRef right_boundary_ref(tile_id, kFreeSpacePathLgId, 2);
++  Boundary right_boundary;
++  right_boundary.ref = right_boundary_ref;
++  for (const auto& point : path) {
++    Eigen::Vector2d normal{ -std::sin(point[2]), std::cos(point[2]) };
++    normal *= kFreeSpacePathBoundaryWidth;
++    geometry_msgs::Point left_boundary_point;
++    left_boundary_point.x = point[0] - normal[0];
++    left_boundary_point.y = point[1] - normal[1];
++    left_boundary.pts.push_back(left_boundary_point);
++    geometry_msgs::Point right_boundary_point;
++    right_boundary_point.x = point[0] + normal[0];
++    right_boundary_point.y = point[1] + normal[1];
++    right_boundary.pts.push_back(right_boundary_point);
++  }
++
++  LaneRef lane_ref(tile_id, kFreeSpacePathLgId, 1);
++  Lane lane;
++  lane.ref = lane_ref;
++  for (const auto& point : path) {
++    geometry_msgs::Point lane_point;
++    lane_point.x = point[0];
++    lane_point.y = point[1];
++    lane.pts.push_back(lane_point);
++  }
++  lane.lane_order = 1;
++  lane.direction_of_travel = lane_map::DirectionOfTravel::FORWARD;
++  lane.left_boundary_ref = left_boundary_ref;
++  lane.right_boundary_ref = right_boundary_ref;
++  lane.lane_type = lane_map::LaneType::PARKING;
++
++  double lg_length = 0;
++  for (size_t i = 1; i < path.size(); ++i) {
++    lg_length += std::sqrt(std::pow(path[i][0] - path[i - 1][0], 2) + std::pow(path[i][1] - path[i - 1][1], 2));
++  }
++
++  LaneGroupRef lg_ref(tile_id, kFreeSpacePathLgId);
++  LaneGroup lg;
++  lg.ref = lg_ref;
++  lg.direction_of_travel = lane_map::DirectionOfTravel::FORWARD;
++  lg.lanes.insert({ lane_ref, lane });
++  lg.boundaries.insert({ left_boundary_ref, left_boundary });
++  lg.boundaries.insert({ right_boundary_ref, right_boundary });
++  lg.length = lg_length;
++  lg.desired_speed_mph = kFreeSpacePathSpeedLimit;
++  lg.heavy_vehicle_speed_mph = kFreeSpacePathSpeedLimit;
++  lg.perimeter = map_utils::createPerimeterPolygon(lg.boundaries);
++
++  return lg;
++}
++
+ 
+ } // namespace lane_map_utils
+diff --git a/mapping/maps/src/maps/utils/lane_preference_layer_utils.cpp b/mapping/maps/src/maps/utils/lane_preference_layer_utils.cpp
+index e846eb146..a2c9eb34f 100644
+--- a/mapping/maps/src/maps/utils/lane_preference_layer_utils.cpp
++++ b/mapping/maps/src/maps/utils/lane_preference_layer_utils.cpp
+@@ -13,7 +13,7 @@ LanePreferenceInfo extractLanePreferences(const lane_map::LaneGroup& lane_group,
+   std::unordered_set<lane_map::LaneRef> preferred_lanes;
+   std::unordered_set<lane_map::LaneRef> lanes_to_avoid;
+ 
+-  std::vector<const Lane*> lanes_in_order = lane_map_utils::getLanesInOrder(lane_group);
++  std::vector<const Lane*> lanes_in_order = lane_map_utils::getLanesLeftToRight(lane_group);
+ 
+   for (const lane_map::PolygonFeature& map_feature : feature_list) {
+     for (const Json::Value& lane_number : map_feature.properties["lanes_to_avoid"]) {
+diff --git a/mapping/maps/src/maps/utils/map_frame_utils.cpp b/mapping/maps/src/maps/utils/map_frame_utils.cpp
+index 15a87cfaf..176897522 100644
+--- a/mapping/maps/src/maps/utils/map_frame_utils.cpp
++++ b/mapping/maps/src/maps/utils/map_frame_utils.cpp
+@@ -51,14 +51,14 @@ MapFrame mapFrameFromLocalization(const MapFrameType frame_type, const perceptio
+ 
+   map_utils::convertGpsToUtm(localization.latitude, localization.longitude, utm_zone, &map_frame.utm_origin.position.x,
+                              &map_frame.utm_origin.position.y);
+-  #ifdef BAZEL
++#ifdef BAZEL
+   // createQuaternionMsgFromYaw is not available in tf2
+   tf2::Quaternion q;
+   q.setRPY(0, 0, utm_theta);
+   map_frame.utm_origin.orientation = tf2::toMsg(q);
+-  #else
++#else
+   map_frame.utm_origin.orientation = tf::createQuaternionMsgFromYaw(utm_theta);
+-  #endif
++#endif
+ 
+   map_frame.utm_zone = utm_zone;
+ 
+diff --git a/mapping/maps/src/maps/utils/terminal_map_utils.cpp b/mapping/maps/src/maps/utils/terminal_map_utils.cpp
+new file mode 100644
+index 000000000..c7a883e78
+--- /dev/null
++++ b/mapping/maps/src/maps/utils/terminal_map_utils.cpp
+@@ -0,0 +1,237 @@
++#include "terminal_map_utils.h"
++
++#include <utils/json/json_io.h>
++#include <utils/map/lane_map_parser.h>
++#include <utils/map/utils.h>
++#include <utils/ros/params.h>
++
++#include <algorithm>
++#include <boost/filesystem.hpp>
++#include <boost/geometry/algorithms/centroid.hpp>
++#include <boost/geometry/algorithms/correct.hpp>
++#include <boost/geometry/algorithms/for_each.hpp>
++#include <boost/geometry/strategies/strategies.hpp>
++
++#include "maps/utils/map_frame_utils.h"
++
++namespace {
++constexpr char kTerminalMapPath[] = "/free_space/terminals/";
++// TODO (tao): Remove following paths and refactor pole and parking spot boundary loading after topy updates the
++// terminal map storage (FRONTIER-2559).
++constexpr char kTerminalPolePath[] = "/free_space/terminals/poles/";
++constexpr char kTerminalParkingSpotBoundaryPath[] = "/free_space/terminals/parking_spot_boundaries/";
++} // namespace
++
++namespace maps {
++namespace terminal_map_utils {
++
++std::vector<lane_map::Pole> getTerminalPoles(const std::string& terminal_id, const std::string& map_dir,
++                                             const perception_msgs::Localization& localization,
++                                             maps::MapFrameType frame_convention)
++{
++  // Set the frame convention.
++  ROS_ASSERT(frame_convention == maps::MapFrameType::GCS || frame_convention == maps::MapFrameType::GCS_NED);
++  const bool use_ned = frame_convention == maps::MapFrameType::GCS_NED;
++
++  // Get localization and UTM data
++  const map_utils::UtmZone utm_zone = maps::utmZoneFromLocalization(localization);
++
++  // Read the pole file
++  std::vector<lane_map::Pole> poles;
++  const std::string file_path = map_dir + kTerminalPolePath + terminal_id + ".json";
++  if (!boost ::filesystem::exists(file_path)) {
++    ROS_WARN_STREAM("No pole map file found for terminal: " << terminal_id);
++    return poles;
++  }
++
++  Json::Value root;
++  if (!utils_json::readJsonFile(file_path, &root)) {
++    ROS_ERROR_STREAM("Error loading pole map for terminal: " << terminal_id);
++    return poles;
++  }
++  constexpr bool assert_feature_types = false;
++  const auto pole_points = lane_map::parsePointFeatures(root, use_ned, assert_feature_types);
++
++  for (const lane_map::PointFeature& pole_point : pole_points) {
++    lane_map::Pole pole;
++
++    pole.id = pole_point.properties["pole_id"].asUInt64();
++    pole.radius = pole_point.properties["radius"].asDouble();
++
++    geometry_msgs::Point geom_point_utm;
++    map_utils::convertGpsToUtm(pole_point.point.x, pole_point.point.y, utm_zone, &geom_point_utm.x, &geom_point_utm.y);
++    pole.center_point = geom_point_utm;
++    pole.point = pole_point.point;
++
++    poles.push_back(pole);
++  }
++  return poles;
++}
++
++std::unordered_map<std::string, lane_map::TerminalParkingSpot>
++getTerminalParkingBoundaries(const std::string& terminal_id, const std::string& map_dir,
++                             const perception_msgs::Localization& localization, maps::MapFrameType frame_convention)
++{
++  // Set the frame convention.
++  assert(frame_convention == maps::MapFrameType::GCS || frame_convention == maps::MapFrameType::GCS_NED);
++  const bool use_ned = frame_convention == maps::MapFrameType::GCS_NED;
++
++  // Get localization and UTM data
++  const uint64_t tile_id = map_utils::latLngToTileId(localization.latitude, localization.longitude);
++  const map_utils::UtmZone utm_zone = maps::utmZoneFromLocalization(localization);
++
++  // Read the file
++  Json::Value root;
++  const std::string file_path = map_dir + kTerminalMapPath + terminal_id + ".json";
++  const bool read_file = utils_json::readJsonFile(file_path, &root);
++  assert(read_file);
++
++  // Load in the features
++  std::unordered_map<std::string, lane_map::TerminalParkingSpot> parking_spots;
++  constexpr bool assert_feature_types = false;
++  const auto parking_perimiter_feats = lane_map::parsePolygonFeatures(root, use_ned, assert_feature_types);
++  const auto parking_perimiter_points = lane_map::parsePointFeatures(root, use_ned, assert_feature_types);
++
++  for (const lane_map::PolygonFeature& feat : parking_perimiter_feats) {
++    lane_map::TerminalParkingSpot parking_spot;
++
++    // Convert polygon to UTM
++    parking_spot.boundary_geometry = feat.polygon;
++    for (auto& point : parking_spot.boundary_geometry.outer()) {
++      double x = point.get<0>();
++      double y = point.get<1>();
++      map_utils::convertGpsToUtm(x, y, utm_zone, &x, &y);
++      point.set<0>(x);
++      point.set<1>(y);
++    }
++
++    parking_spot.parking_spot_id = feat.properties["id"].asString();
++    parking_spots[feat.properties["id"].asString()] = parking_spot;
++  }
++
++  for (const lane_map::PointFeature& feat : parking_perimiter_points) {
++    std::string parking_spot_id = feat.properties["id"].asString();
++    // Removes the "_1" character from the end of the string
++    parking_spot_id = parking_spot_id.substr(0, parking_spot_id.size() - 2);
++    if (parking_spots.find(parking_spot_id) == parking_spots.end()) {
++      ROS_WARN_STREAM("Point feature " << parking_spot_id
++                                       << " does not have a corresponding polygon feature. Skipping.");
++      continue;
++    }
++    lane_map::TerminalParkingSpot& parking_spot = parking_spots.find(parking_spot_id)->second;
++
++    geometry_msgs::Point geom_point_utm;
++    map_utils::convertGpsToUtm(feat.point.x, feat.point.y, utm_zone, &geom_point_utm.x, &geom_point_utm.y);
++    parking_spot.center_point = geom_point_utm;
++
++    parking_spot.heading = feat.properties["heading"].asDouble();
++
++    // Assuming there is only one inflow and outflow lane group per parking spot
++    assert(feat.properties["inflow_lane_group_ids"].size() == 1);
++    assert(feat.properties["outflow_lane_group_ids"].size() == 1);
++    parking_spot.inflow_ref.id = feat.properties["inflow_lane_group_ids"][0].asInt64();
++    parking_spot.outflow_ref.id = feat.properties["outflow_lane_group_ids"][0].asInt64();
++    parking_spot.inflow_ref.tile_id = tile_id;
++    parking_spot.outflow_ref.tile_id = tile_id;
++
++    // Set the left and right boundary ids
++    if (feat.properties.isMember("left_boundary_id")) {
++      parking_spot.left_boundary_id = feat.properties["left_boundary_id"].asUInt64();
++    }
++    if (feat.properties.isMember("right_boundary_id")) {
++      parking_spot.right_boundary_id = feat.properties["right_boundary_id"].asUInt64();
++    }
++  }
++
++  return parking_spots;
++}
++
++std::unordered_map<uint64_t, lane_map::ParkingSpotBoundary>
++getTerminalParkingSpotBoundaries(const std::string& terminal_id, const std::string& map_dir,
++                                 const perception_msgs::Localization& localization, maps::MapFrameType frame_convention)
++{
++  // Set the frame convention.
++  ROS_ASSERT(frame_convention == maps::MapFrameType::GCS || frame_convention == maps::MapFrameType::GCS_NED);
++  const bool use_ned = frame_convention == maps::MapFrameType::GCS_NED;
++
++  // Get localization and UTM data
++  const map_utils::UtmZone utm_zone = maps::utmZoneFromLocalization(localization);
++
++  // Read parking spot boundary file
++  std::unordered_map<uint64_t, lane_map::ParkingSpotBoundary> parking_spot_boundaries;
++  const std::string file_path = map_dir + kTerminalParkingSpotBoundaryPath + terminal_id + ".json";
++  if (!boost ::filesystem::exists(file_path)) {
++    ROS_WARN_STREAM("No parking spot boundary file found for terminal: " << terminal_id);
++    return parking_spot_boundaries;
++  }
++
++  Json::Value root;
++  if (!utils_json::readJsonFile(file_path, &root)) {
++    ROS_ERROR_STREAM("Error loading parking spot boundary map for terminal: " << terminal_id);
++    return parking_spot_boundaries;
++  }
++
++  for (const auto& json_feature : root["features"]) {
++    lane_map::ParkingSpotBoundary parking_spot_boundary;
++    parking_spot_boundary.id = json_feature["properties"]["id"].asUInt64();
++    parking_spot_boundary.marking_width = json_feature["properties"]["marking_width"].asString();
++    // Convert line points to UTM
++    for (const auto& point : geojson_utils::asPoint64Vector(json_feature["geometry"]["coordinates"], use_ned)) {
++      geometry_msgs::Point geom_point_utm;
++      map_utils::convertGpsToUtm(point.x, point.y, utm_zone, &geom_point_utm.x, &geom_point_utm.y);
++      parking_spot_boundary.pts.push_back(geom_point_utm);
++    }
++    parking_spot_boundaries[parking_spot_boundary.id] = parking_spot_boundary;
++  }
++
++  return parking_spot_boundaries;
++}
++
++lane_map::TerminalMap getTerminalMap(const std::string& terminal_id, const std::string& map_dir,
++                                     const perception_msgs::Localization& localization,
++                                     maps::MapFrameType frame_convention)
++{
++  lane_map::TerminalMap terminal_map;
++  terminal_map.terminal_id = terminal_id;
++  terminal_map.terminal_parking_spots =
++      std::move(getTerminalParkingBoundaries(terminal_id, map_dir, localization, frame_convention));
++  terminal_map.terminal_poles = std::move(getTerminalPoles(terminal_id, map_dir, localization, frame_convention));
++  terminal_map.terminal_parking_spot_boundaries =
++      std::move(getTerminalParkingSpotBoundaries(terminal_id, map_dir, localization, frame_convention));
++  return terminal_map;
++}
++
++lane_map::TerminalMap getTerminalMap(const std::string& terminal_id, const std::string& map_dir, const double latitutde,
++                                     const double longitude, maps::MapFrameType frame_convention)
++{
++  perception_msgs::Localization localization;
++  localization.latitude = latitutde;
++  localization.longitude = longitude;
++  return getTerminalMap(terminal_id, map_dir, localization, frame_convention);
++}
++
++// todo here. check if we need to send a pole terminal map from scene generator.
++lane_map::TerminalMap buildTerminalMap(const perception_msgs::TerminalMap& terminal_map_msg)
++{
++  lane_map::TerminalMap terminal_map;
++  terminal_map.terminal_id = terminal_map_msg.terminal_id;
++
++  for (const auto& parking_spot : terminal_map_msg.terminal_parking_spots) {
++    lane_map::TerminalParkingSpot terminal_parking_spot;
++    terminal_parking_spot.parking_spot_id = parking_spot.parking_spot_id;
++    terminal_parking_spot.center_point = parking_spot.center_point;
++    terminal_parking_spot.heading = parking_spot.heading;
++    terminal_parking_spot.inflow_ref.tile_id = parking_spot.inflow_ref.tile_id;
++    terminal_parking_spot.inflow_ref.id = parking_spot.inflow_ref.id;
++    terminal_parking_spot.outflow_ref.tile_id = parking_spot.outflow_ref.tile_id;
++    terminal_parking_spot.outflow_ref.id = parking_spot.outflow_ref.id;
++    terminal_parking_spot.boundary_geometry = map_utils::getBoostPolygonFromPoints(parking_spot.boundary_geometry);
++    terminal_map.terminal_parking_spots[parking_spot.parking_spot_id] = terminal_parking_spot;
++  }
++
++  return terminal_map;
++}
++
++
++} // namespace terminal_map_utils
++} // namespace maps

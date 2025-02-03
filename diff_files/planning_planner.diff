@@ -1,0 +1,1022 @@
+diff --git a/planning/planner/include/planner/engagement_handler.h b/planning/planner/include/planner/engagement_handler.h
+index b8716da0f..eb18e8bb8 100644
+--- a/planning/planner/include/planner/engagement_handler.h
++++ b/planning/planner/include/planner/engagement_handler.h
+@@ -65,4 +65,4 @@ class EngagementHandler
+   double max_soft_engage_time_ = 8.0;
+   double comfort_soft_engage_decel_ = -0.5;
+ };
+-} // namespace planning
+\ No newline at end of file
++} // namespace planning
+diff --git a/planning/planner/include/planner/ms_planner_node.h b/planning/planner/include/planner/ms_planner_node.h
+new file mode 100644
+index 000000000..d89d106f1
+--- /dev/null
++++ b/planning/planner/include/planner/ms_planner_node.h
+@@ -0,0 +1,54 @@
++#pragma once
++
++#include <ros/node_handle.h>
++
++#include "diagnostics_utils/instrumentation.h"
++#include "perception_msgs/Localization.h"
++#include "perception_msgs/TriggerEstimation.h"
++#include "planning_common/types/planning_types.h"
++#include "planning_msgs/PlannerOutTrajectory.h"
++#include "utils/stateful/stateful.h"
++
++namespace planning {
++
++class MSPlannerNode : public stateful::Stateful
++{
++ public:
++  explicit MSPlannerNode(ros::NodeHandle* nh);
++
++ protected:
++  void clear_state() override
++  {
++  }
++
++ private:
++  ros::NodeHandle* nh_;
++
++  ros::Subscriber localization_sub_;
++  diagnostics_utils::PublisherWrapper<planning_msgs::PlannerOutTrajectory> trajectory_pub_;
++  ros::Subscriber trigger_sub_;
++
++  CartesianState latest_received_odom_pose_;
++  Eigen::Vector3d latest_received_localization_utm_;
++  Eigen::Vector3d route_starting_point_;
++
++  std::vector<Eigen::Vector2d> route_points_;
++  void InitializeRoutePointsWithStartingPoint();
++  // The txt file should have the format on each line: longitude latitude heading
++  void InitializeRoutePointsFromTxt();
++
++  // TODO: This function exist in terminal behavior helpers but terminal behavior is not in hd bringup master. Use
++  // terminal behavior helper once it is available in hd bringup master
++  Eigen::Vector3d GCSToUTM(double longitude, double latitude, double heading);
++
++  void LocalizationCallback(const perception_msgs::Localization& msg);
++  void TriggerEstimationCallback(const perception_msgs::TriggerEstimation& msg);
++  std::vector<Eigen::Vector3d> GenerateTrajectory();
++  void PublishTrajectory();
++
++  double trajectory_static_velocity_;
++  bool initialize_route_from_txt_;
++  std::string route_gcs_file_;
++};
++
++} // namespace planning
+diff --git a/planning/planner/include/planner/planner.h b/planning/planner/include/planner/planner.h
+index 6573f1ff6..6151cacd1 100644
+--- a/planning/planner/include/planner/planner.h
++++ b/planning/planner/include/planner/planner.h
+@@ -3,9 +3,11 @@
+ 
+ #include <std_msgs/Bool.h>
+ 
++#include <Eigen/Core>
+ #include <future>
+ 
+ #include "behavior_planner/behavior_planner.h"
++#include "behavior_planner/terminal_planner.h"
+ #include "engagement_handler.h"
+ #include "planner_debug/planner_debug_info.h"
+ #include "planning_common/types/operational_domain.h"
+@@ -49,6 +51,10 @@ class Planner
+ 
+   LateralTrajectoryResult& getBestLateralTrajectory();
+ 
++  bool isFreeSpacePlanReady() const;
++
++  std::optional<std::vector<Eigen::Vector3d>> getFreeSpacePath() const;
++
+   /**
+    * @brief Main planning call. Will run all steps needed for planning given a scene
+    * @param scene        The current scene
+@@ -73,6 +79,7 @@ class Planner
+ 
+   // Behavioral planner
+   BehaviorPlanner behavior_planner_;
++  TerminalPlanner terminal_planner_;
+   TeleopPlanner teleop_planner_;
+ 
+   // Trajectory planner
+@@ -88,6 +95,8 @@ class Planner
+ 
+   Initializer initializer_;
+   bool tg_initialized_;
++
++  bool free_space_plan_ready_ = false;
+ };
+ 
+ } // namespace planning
+diff --git a/planning/planner/include/planner/planner_node.h b/planning/planner/include/planner/planner_node.h
+index 4377ac3e0..e563abaea 100644
+--- a/planning/planner/include/planner/planner_node.h
++++ b/planning/planner/include/planner/planner_node.h
+@@ -8,6 +8,7 @@
+ #include <sys/types.h>
+ #include <utils/ros/rate_limited_publisher.h>
+ 
++#include <Eigen/Geometry>
+ #include <boost/optional.hpp>
+ #include <memory>
+ 
+@@ -31,6 +32,7 @@
+ #include "receive_ready_signals/signal_sender.h"
+ #include "ros/message_traits.h"
+ #include "scene_subscriber.h"
++#include "speed_limit_tracker/speed_limit_tracker.h"
+ #include "truck_adapter/driver_alerts.h"
+ #include "truck_adapter/truck_functions.h"
+ #include "utils/stateful/stateful.h"
+@@ -87,6 +89,31 @@ class PlannerNode : public stateful::Stateful
+   void publishReferenceLineOverlay(const ReferenceLine& ref_line, const ros::Time& timestamp,
+                                    const ros::Publisher& pub) const;
+ 
++  /**
++   * @brief Updates terminal state machine with current scene
++   *
++   * @param[in] scene_msg   the current scene
++   */
++  void evaluateTerminalState(const perception_msgs::Scene& scene_msg);
++
++
++  /**
++   * @brief Initialize terminal state machine with route waypoints
++   * Also populates terminal_waypoints_ and route_polyline_ to simplify ego travel computation
++   *
++   * @param[in] scene_msg   the current scene
++   *
++   */
++  void initializeTerminalStateMachine(const perception_msgs::Scene& scene_msg);
++
++  /**
++   * Compute ego travel on route based on ego state
++   *
++   * @param ego_state: ego state message
++   * @return: ego travel on polyline consisting of only terminal waypoints (Parking Spot, Inflow, Outflow)
++   */
++  double computeEgoTravelOnRoute(const perception_msgs::EgoState& ego_state) const;
++
+   // ROS NodeHandle
+   ros::NodeHandle* nh_;
+ 
+@@ -125,6 +152,9 @@ class PlannerNode : public stateful::Stateful
+   // Tracks lane IDs
+   LaneIDTracker lane_id_tracker_;
+ 
++  // Speed Limit Handler
++  SpeedLimitTracker speed_limit_tracker_;
++
+   // Last previously known ego lane ref. Used to help mappery decide what is our current ego lane
+   // ref when there are multiple possibilities.
+   boost::optional<lane_map::LaneRef> last_known_ego_lane_ref_;
+@@ -139,6 +169,15 @@ class PlannerNode : public stateful::Stateful
+ 
+   // Lets the Ready Handler know we're ready - used for simulation and (in the future) lock-step
+   receive_ready_signals::ReceiveReadySignalSender receive_ready_sender_;
++
++  // State machine for determining whether to use terminal planner
++  std::unique_ptr<terminal_sm::TerminalStateMachine> terminal_state_machine_ = nullptr;
++
++  // State machine for stopping and going at terminal stop lines
++  std::unique_ptr<terminal_stop_go_sm::TerminalStopGoStateMachine> terminal_stop_go_state_machine_ = nullptr;
++
++  std::vector<Eigen::Vector3d> route_polyline_; // Polyline of terminal state machine waypoints in UTM
++  std::vector<double> route_travel_;            // Travel distance along route_polyline_
+ };
+ 
+ // These functions were moved out of PlannerNode class to make it clear that they do not rely on any
+@@ -154,7 +193,8 @@ namespace internal {
+  * @param[in] chosen_action_target The action target associated with the chosen trajectory.
+  * @return Debug message.
+  */
+-planning_msgs::PlannerInfo addDebugMessages(const PredictedScene& scene, const PlannerDebugInfo& planner_debug_info,
++planning_msgs::PlannerInfo addDebugMessages(const PredictedScene& scene, int terminal_state,
++                                            const PlannerDebugInfo& planner_debug_info,
+                                             const LongitudinalTrajectoryResult& best_longitudinal_trajectory,
+                                             const LateralTrajectoryResult& best_lateral_trajectory,
+                                             const ActionTarget& chosen_action_target);
+diff --git a/planning/planner/include/planner/planner_viz_publisher.h b/planning/planner/include/planner/planner_viz_publisher.h
+index a93b7d125..d4d7bda10 100644
+--- a/planning/planner/include/planner/planner_viz_publisher.h
++++ b/planning/planner/include/planner/planner_viz_publisher.h
+@@ -29,4 +29,4 @@ class PlannerVizPublisher : public thread_utils::AsyncUpdateLoop
+   PlannerVisualization viz_;
+ };
+ 
+-} // namespace planning
+\ No newline at end of file
++} // namespace planning
+diff --git a/planning/planner/include/planner/tgv2_log_publisher.h b/planning/planner/include/planner/tgv2_log_publisher.h
+index 1f8e3bea1..9bbd4ad3f 100644
+--- a/planning/planner/include/planner/tgv2_log_publisher.h
++++ b/planning/planner/include/planner/tgv2_log_publisher.h
+@@ -29,4 +29,4 @@ class LogPublisher : public thread_utils::AsyncUpdateLoop
+ 
+ } // namespace tgv2
+ 
+-} // namespace planning
+\ No newline at end of file
++} // namespace planning
+diff --git a/planning/planner/launch/ms_planner.launch b/planning/planner/launch/ms_planner.launch
+new file mode 100644
+index 000000000..7a12fb5d9
+--- /dev/null
++++ b/planning/planner/launch/ms_planner.launch
+@@ -0,0 +1,9 @@
++<?xml version="1.0"?>
++<launch>
++    <param name="/ms_planner/trajectory_static_velocity" value="2.0"/>
++    <param name="/ms_planner/initialize_route_from_txt" value="False"/>
++    <param name="/ms_planner/route_type" type="string" value="straight"/>
++    <param name="/ms_planner/route_gcs_file" type="string" value="/home/embark/catkin_ws/src/brain/planning/planner/nodes/planner/localization_for_ms_planner/points_in_sim.txt"/>
++    <node unless="$(eval optenv('BAZEL', 'false') == 'true')" pkg="planner" type="ms_planner_node" name="ms_planner" launch-prefix="log_stdout">
++    </node>
++</launch>
+diff --git a/planning/planner/nodes/localization_recording/localization_recording_node.py b/planning/planner/nodes/localization_recording/localization_recording_node.py
+new file mode 100755
+index 000000000..6800d7d6e
+--- /dev/null
++++ b/planning/planner/nodes/localization_recording/localization_recording_node.py
+@@ -0,0 +1,39 @@
++#!/usr/bin/env python3
++import rospy
++
++from perception_msgs.msg import Localization
++
++
++class LocalizationLogger:
++    def __init__(self):
++        # Initialize the node
++        rospy.init_node("localization_logger", anonymous=True)
++        self.file = open(
++            rospy.get_param("/localization_recording/recording_filepath"),
++            "a",
++        )
++        rospy.Subscriber(
++            "/perception/localization", Localization, self.localization_callback
++        )
++        rospy.on_shutdown(self.cleanup)
++
++    def localization_callback(self, msg):
++        # Write the data to the file as soon as a message is received
++        self.file.write(f"{msg.longitude} {msg.latitude} {msg.heading}\n")
++
++    def cleanup(self):
++        # This function is called when the node is shut down
++        rospy.loginfo("Shutting down, closing file...")
++        self.file.close()
++
++    def run(self):
++        # Keep the node running
++        rospy.spin()
++
++
++if __name__ == "__main__":
++    try:
++        logger = LocalizationLogger()
++        logger.run()
++    except rospy.ROSInterruptException:
++        pass
+diff --git a/planning/planner/nodes/planner/ms_planner_node.cpp b/planning/planner/nodes/planner/ms_planner_node.cpp
+new file mode 100644
+index 000000000..7d4f4198b
+--- /dev/null
++++ b/planning/planner/nodes/planner/ms_planner_node.cpp
+@@ -0,0 +1,344 @@
++#include "planner/ms_planner_node.h"
++
++#include <maps/utils/lane_map_utils.h>
++#include <planning_common/math/planning_math.h>
++#include <utils/ros/params.h>
++
++#include <fstream>
++
++#ifdef BAZEL
++#include <tf2/utils.h>
++#else
++#include <tf/transform_datatypes.h>
++#endif
++
++#include "diagnostics_utils/crash_handler.h"
++#include "free_space_planner/distance.h"
++#include "free_space_planner/geometric_vector2d.h"
++#include "planning_msgs/State.h"
++namespace planning {
++
++namespace {
++
++constexpr double TRAJECTORY_HORIZON = 12.0;
++constexpr double TRAJECTORY_DT = 0.1;
++constexpr double CLOSEST_POINT_THRESHOLD = 20.0;
++
++} // namespace
++
++MSPlannerNode::MSPlannerNode(ros::NodeHandle* nh) : stateful::Stateful::Stateful(nh), nh_(nh)
++{
++  trajectory_pub_ = diagnostics_utils::createPublisherWrapper<planning_msgs::PlannerOutTrajectory>(
++                        nh->advertise<planning_msgs::PlannerOutTrajectory>("/planning/trajectory", 3, true))
++                        ->trace()
++                        ->receipt(nh);
++  trigger_sub_ = nh->subscribe("/trigger_estimation", 1, &MSPlannerNode::TriggerEstimationCallback, this);
++  localization_sub_ = nh->subscribe("/perception/localization", 1, &MSPlannerNode::LocalizationCallback, this);
++
++  // Initialize the latest received starting point and localization to zero
++  route_starting_point_ = Eigen::Vector3d::Zero();
++  latest_received_localization_utm_ = Eigen::Vector3d::Zero();
++
++  initialize_route_from_txt_ = ros_params::getRequiredParam<bool>(nh_, "/ms_planner/initialize_route_from_txt");
++  if (initialize_route_from_txt_) {
++    route_gcs_file_ = ros_params::getRequiredParam<std::string>(nh_, "/ms_planner/route_gcs_file");
++    ROS_INFO("Loaded route gcs file: %s", route_gcs_file_.c_str());
++    InitializeRoutePointsFromTxt();
++  }
++
++  trajectory_static_velocity_ = ros_params::getRequiredParam<double>(nh_, "/ms_planner/trajectory_static_velocity");
++  ROS_INFO("Loaded static velocity: %f", trajectory_static_velocity_);
++
++  ros::Rate rate(20);
++  while (ros::ok()) {
++    PublishTrajectory();
++    ros::spinOnce();
++    rate.sleep();
++  }
++}
++
++void MSPlannerNode::TriggerEstimationCallback(const perception_msgs::TriggerEstimation& msg)
++{
++  nav_msgs::Odometry received_odom = msg.predicted_odom;
++  const auto vehicle_odom_T =
++      Eigen::Translation3d(received_odom.pose.pose.position.x, received_odom.pose.pose.position.y,
++                           received_odom.pose.pose.position.z) *
++#ifdef BAZEL
++      Eigen::AngleAxisd(tf2::getYaw(received_odom.pose.pose.orientation), Eigen::Vector3d::UnitZ());
++#else
++      Eigen::AngleAxisd(tf::getYaw(received_odom.pose.pose.orientation), Eigen::Vector3d::UnitZ());
++#endif
++  const double yaw = planning_math::getYaw(vehicle_odom_T);
++  const auto translation_part = vehicle_odom_T.translation();
++  const double x = translation_part.x();
++  const double y = translation_part.y();
++  latest_received_odom_pose_ = CartesianState{ 0, x, y, yaw, 0, 0, 0, 0 };
++}
++
++void MSPlannerNode::LocalizationCallback(const perception_msgs::Localization& msg)
++{
++  auto ego_utm = GCSToUTM(msg.longitude, msg.latitude, msg.heading);
++  latest_received_localization_utm_ = Eigen::Vector3d(ego_utm[0], ego_utm[1], ego_utm[2]);
++  if (route_starting_point_.isZero()) {
++    route_starting_point_ = latest_received_localization_utm_;
++    if (!initialize_route_from_txt_) {
++      InitializeRoutePointsWithStartingPoint();
++    }
++  }
++  ROS_INFO("Received localization: x: %f, y: %f, heading: %f", latest_received_localization_utm_[0],
++           latest_received_localization_utm_[1], latest_received_localization_utm_[2]);
++}
++
++Eigen::Vector3d MSPlannerNode::GCSToUTM(double longitude, double latitude, double heading)
++{
++  map_utils::UtmZone zone = map_utils::getUtmZone(latitude, longitude);
++  double utm_x, utm_y;
++  map_utils::convertGpsToUtm(latitude, longitude, zone, &utm_x, &utm_y);
++  const double utm_theta = map_utils::getUtmTheta(zone, heading, latitude, longitude);
++  return Eigen::Vector3d(utm_x, utm_y, utm_theta);
++}
++
++void MSPlannerNode::InitializeRoutePointsWithStartingPoint()
++{
++  std::string route_type = ros_params::getRequiredParam<std::string>(nh_, "/ms_planner/route_type");
++  if (route_type == "straight") {
++    // create 100 points on a straight line 5 meter apart
++    for (int i = 0; i < 100; i++) {
++      Eigen::Vector2d point;
++      double displacement = 5 * i;
++      double direction_used = route_starting_point_[2];
++      point[0] = route_starting_point_[0] + displacement * cos(direction_used);
++      point[1] = route_starting_point_[1] + displacement * sin(direction_used);
++      route_points_.push_back(point);
++    }
++  } else if (route_type == "circle") {
++    // create 100 points on a circle with radius 40 meters starting from route_starting_point_ and are 4 meters apart,
++    // with heading of the circle being the heading of the starting point
++    const double RADIUS = 40;
++    int NUM_POINTS = 100;
++    const double distance_apart = 4.0;
++    const double center_x = route_starting_point_[0] + RADIUS * cos(route_starting_point_[2] + M_PI_2);
++    const double center_y = route_starting_point_[1] + RADIUS * sin(route_starting_point_[2] + M_PI_2);
++
++    for (int i = 0; i < NUM_POINTS; i++) {
++      double angle = (distance_apart * i / (2 * M_PI * RADIUS)) * 2 * M_PI;
++      double circle_x = center_x + RADIUS * cos(angle - (M_PI_2 - route_starting_point_[2]));
++      double circle_y = center_y + RADIUS * sin(angle - (M_PI_2 - route_starting_point_[2]));
++      Eigen::Vector2d point = Eigen::Vector2d(circle_x, circle_y);
++      route_points_.push_back(point);
++    }
++  } else {
++    ROS_ERROR("Invalid route type: %s", route_type.c_str());
++  }
++}
++
++void MSPlannerNode::InitializeRoutePointsFromTxt()
++{
++  std::ifstream file(route_gcs_file_);
++  if (!file.is_open()) {
++    ROS_ERROR("Could not open file %s", route_gcs_file_.c_str());
++    return;
++  }
++
++  std::vector<Eigen::Vector3d> gcs_points;
++  std::string line;
++  while (std::getline(file, line)) {
++    std::istringstream iss(line);
++    double longitude, latitude, heading;
++    if (!(iss >> longitude >> latitude >> heading)) {
++      ROS_ERROR("Error reading line %s", line.c_str());
++      break;
++    }
++    gcs_points.push_back(Eigen::Vector3d(longitude, latitude, 0.0));
++  }
++
++  for (const auto& point : gcs_points) {
++    Eigen::Vector3d utm_point = GCSToUTM(point[0], point[1], point[2]);
++    route_points_.push_back(Eigen::Vector2d(utm_point[0], utm_point[1]));
++  }
++}
++
++std::vector<Eigen::Vector3d> MSPlannerNode::GenerateTrajectory()
++{
++  // Get consecutive points for line segments
++  ROS_ASSERT(route_points_.size() > 1);
++
++  if (latest_received_localization_utm_.isZero()) {
++    ROS_INFO("Localization not received, not generating trajectory");
++    return {};
++  }
++
++  Eigen::Vector2d closest_start_point;
++  Eigen::Vector2d closest_end_point;
++  Eigen::Vector2d closest_projection_point;
++  double min_distance = std::numeric_limits<double>::max();
++
++  for (int i = 0; i < route_points_.size() - 1; i++) {
++    Eigen::Vector2d p1 = route_points_[i];
++    Eigen::Vector2d p2 = route_points_[i + 1];
++    Eigen::Vector2d current_point_2d =
++        Eigen::Vector2d(latest_received_localization_utm_[0], latest_received_localization_utm_[1]);
++
++    auto [projection_point, distance] = planning::ClosestPoint(current_point_2d, p1, p2);
++    if (distance < min_distance) {
++      min_distance = distance;
++      closest_start_point = p1;
++      closest_end_point = p2;
++      closest_projection_point = projection_point;
++    }
++  }
++
++  if (min_distance > CLOSEST_POINT_THRESHOLD) {
++    ROS_INFO("Closest point is too far away : %f meters away, not generating trajectory", min_distance);
++    return {};
++  }
++
++  // compute the heading of the closest segment
++  const double heading =
++      atan2(closest_end_point[1] - closest_start_point[1], closest_end_point[0] - closest_start_point[0]);
++
++  std::vector<Eigen::Vector3d> route_points;
++  for (double trajectory_time = 0.0; trajectory_time < TRAJECTORY_HORIZON; trajectory_time += TRAJECTORY_DT) {
++    Eigen::Vector3d point;
++    point[0] = closest_projection_point[0] + trajectory_static_velocity_ * trajectory_time * cos(heading);
++    point[1] = closest_projection_point[1] + trajectory_static_velocity_ * trajectory_time * sin(heading);
++    point[2] = heading;
++    route_points.push_back(point);
++  }
++
++  std::vector<Eigen::Vector3d> route_points_local_frame;
++  for (const auto& point : route_points) {
++    Eigen::Vector3d point_local_frame;
++    point_local_frame[0] =
++        (point[0] - latest_received_localization_utm_[0]) * cos(latest_received_localization_utm_[2]) +
++        (point[1] - latest_received_localization_utm_[1]) * sin(latest_received_localization_utm_[2]);
++    point_local_frame[1] =
++        -(point[0] - latest_received_localization_utm_[0]) * sin(latest_received_localization_utm_[2]) +
++        (point[1] - latest_received_localization_utm_[1]) * cos(latest_received_localization_utm_[2]);
++    point_local_frame[2] = std::fmod(point[2] - latest_received_localization_utm_[2], 2 * M_PI);
++    route_points_local_frame.push_back(point_local_frame);
++  }
++  return route_points_local_frame;
++}
++
++void MSPlannerNode::PublishTrajectory()
++{
++  std::vector<Eigen::Vector3d> route_points_local_frame;
++  bool publish_dummy_trajectory = false;
++  if (route_points_.empty()) {
++    ROS_INFO("Route points empty, publishing dummy trajectory");
++    publish_dummy_trajectory = true;
++  } else {
++    route_points_local_frame = GenerateTrajectory();
++    if (route_points_local_frame.empty()) {
++      ROS_INFO("Route points in local frame empty, publishing dummy trajectory");
++      publish_dummy_trajectory = true;
++    }
++  }
++
++  if (publish_dummy_trajectory) {
++    for (int i = 0; i < TRAJECTORY_HORIZON / TRAJECTORY_DT; i++) {
++      Eigen::Vector3d point;
++      point[0] = 0.0; // stay still
++      point[1] = 0.0;
++      point[2] = 0.0;
++      route_points_local_frame.push_back(point);
++    }
++  }
++
++  planning_msgs::PlannerOutTrajectory trajectory_msg;
++  ros::Time header_stamp = ros::Time::now();
++
++  trajectory_msg.header.stamp = header_stamp;
++  trajectory_msg.plan_time_stamp = header_stamp;
++  trajectory_msg.trace_id = diagnostics_utils::TracePublisher::getCurrentTraceId();
++
++  trajectory_msg.trajectory_odom_pose.t = 0.0;
++  trajectory_msg.trajectory_odom_pose.x = latest_received_odom_pose_.x;
++  trajectory_msg.trajectory_odom_pose.y = latest_received_odom_pose_.y;
++  trajectory_msg.trajectory_odom_pose.heading = latest_received_odom_pose_.heading;
++  trajectory_msg.trajectory_odom_pose.curvature = latest_received_odom_pose_.curvature;
++  trajectory_msg.trajectory_odom_pose.s = latest_received_odom_pose_.arclength_s;
++
++  const size_t trajectory_size = TRAJECTORY_HORIZON / TRAJECTORY_DT;
++  trajectory_msg.trajectory.reserve(trajectory_size);
++  trajectory_msg.lat_trajectory.reserve(trajectory_size);
++  trajectory_msg.long_trajectory.reserve(trajectory_size);
++
++  planning_msgs::PathPoints path_points;
++  path_points.header.stamp = header_stamp;
++  geometry_msgs::Point32 p;
++  planning_msgs::State trajectory_state;
++
++  planning_msgs::State longitudinal_state;
++  planning_msgs::State lateral_state;
++  for (int i = 0; i < TRAJECTORY_HORIZON / TRAJECTORY_DT; i++) {
++    Eigen::Vector3d local_point = route_points_local_frame[i];
++
++    double trajectory_time = i * TRAJECTORY_DT;
++    p.x = local_point[0];
++    p.y = local_point[1];
++    path_points.points.push_back(p);
++
++    trajectory_state.t = trajectory_time;
++    trajectory_state.x = local_point[0];
++    trajectory_state.y = local_point[1];
++    trajectory_state.heading = local_point[2];
++    trajectory_state.s = trajectory_static_velocity_ * trajectory_time;
++    trajectory_state.v = trajectory_static_velocity_;
++    trajectory_state.a = 0.0;
++    trajectory_state.j = 0.0;
++    trajectory_msg.trajectory.push_back(trajectory_state);
++
++    longitudinal_state.t = trajectory_time;
++    longitudinal_state.x = local_point[0];
++    longitudinal_state.y = 0.0;
++    longitudinal_state.heading = 0.0;
++    longitudinal_state.s = 0.0;
++    longitudinal_state.v = trajectory_static_velocity_;
++    longitudinal_state.a = 0.0;
++    longitudinal_state.j = 0.0;
++    trajectory_msg.long_trajectory.push_back(longitudinal_state);
++
++    lateral_state.t = trajectory_time;
++    lateral_state.x = local_point[1];
++    lateral_state.y = 0.0;
++    lateral_state.heading = local_point[2];
++    lateral_state.s = 0.0;
++    lateral_state.v = 0.0;
++    lateral_state.a = 0.0;
++    lateral_state.j = 0.0;
++    trajectory_msg.lat_trajectory.push_back(lateral_state);
++  }
++  trajectory_msg.path = path_points;
++
++  // Hardcoded control modes
++  trajectory_msg.brake_mode = planning_msgs::PlannerOutTrajectory::NORMAL;
++  trajectory_msg.acc_mode.acc_mode = planning_msgs::AccelerationControlMode::NORMAL;
++  // trajectory_msg.steering_mode.steering_mode = planning_msgs::SteeringControlMode::NORMAL_STEER;
++  trajectory_msg.steering_mode.steering_mode = planning_msgs::SteeringControlMode::AGGRESSIVE_STEER;
++
++  trajectory_msg.traj_type = "VELOCITY_KEEP";
++  trajectory_msg.duration = TRAJECTORY_HORIZON - TRAJECTORY_DT; // 11.9
++  trajectory_msg.reinit = false;
++
++  trajectory_pub_->publish(trajectory_msg, CALLER_INFO());
++}
++
++} // namespace planning
++
++int main(int argc, char* argv[])
++{
++  ros::init(argc, argv, "ms_planner");
++
++  crash_handler::install_crash_handler();
++
++  ros::NodeHandle nh;
++
++  auto pub = diagnostics_utils::NodeHealthPublisher::init_no_thread(&nh, "ms_planner");
++  diagnostics_utils::TracePublisher::init(&nh);
++
++  planning::MSPlannerNode planner_node(&nh);
++
++  return 0;
++}
+diff --git a/planning/planner/nodes/planner/planner_node.cpp b/planning/planner/nodes/planner/planner_node.cpp
+index b653f0c92..8cb6ddbbd 100644
+--- a/planning/planner/nodes/planner/planner_node.cpp
++++ b/planning/planner/nodes/planner/planner_node.cpp
+@@ -3,6 +3,7 @@
+ #include <planning_common/utils/map_build.h>
+ #include <utils/basic_types/basic_types.h>
+ #include <utils/constants/constants.h>
++#include <utils/polyline/project.h>
+ #include <utils/ros/module_status.h>
+ 
+ #include <algorithm>
+@@ -30,7 +31,9 @@
+ #include "planning_msgs/StringStampedTraced.h"
+ #include "planning_msgs/TGv2Debug.h"
+ #include "planning_msgs/TGv2GeneratorRuntime.h"
++#include "planning_msgs/VelocityRequest.h"
+ #include "std_msgs/String.h"
++#include "terminal_state_machine/terminal_state_machine.h"
+ #include "trajectory_generation_v2/utils/logger.h"
+ 
+ namespace planning {
+@@ -55,6 +58,62 @@ bool isHoldingBrake(const LongitudinalTrajectoryResult& planned_trajectory, cons
+          planned_trajectory.trajectory.evaluateSampled(LOOKAHEAD).v <= EGO_LAUNCH_THRESHOLD;
+ }
+ 
++std::optional<terminal_sm::WaypointType> getTerminalPlanningWaypointType(size_t wp_idx, size_t num_wp, uint8_t wp_type)
++{
++  if (wp_idx == 0) {
++    CHECK(wp_type == perception_msgs::MapWaypoint::WAYPOINT_TRIP_ORIGIN ||
++          wp_type == perception_msgs::MapWaypoint::WAYPOINT_PARKING_SPOT);
++    return terminal_sm::WaypointType::START;
++  }
++  if (wp_idx == num_wp - 1) {
++    CHECK(wp_type == perception_msgs::MapWaypoint::WAYPOINT_TRIP_DESTINATION ||
++          wp_type == perception_msgs::MapWaypoint::WAYPOINT_PARKING_SPOT);
++    return terminal_sm::WaypointType::END;
++  }
++  if (wp_type == perception_msgs::MapWaypoint::WAYPOINT_PARKING_INFLOW) {
++    return terminal_sm::WaypointType::PARKING_HANDOFF;
++  }
++  if (wp_type == perception_msgs::MapWaypoint::WAYPOINT_PARKING_OUTFLOW) {
++    return terminal_sm::WaypointType::UNPARKING_HANDOFF;
++  }
++  return std::nullopt;
++}
++
++std::optional<terminal_stop_go_sm::WaypointType> getTerminalStopGoWaypointType(size_t wp_idx, size_t num_wp,
++                                                                               uint8_t wp_type)
++{
++  if (wp_idx == 0) {
++    CHECK(wp_type == perception_msgs::MapWaypoint::WAYPOINT_TRIP_ORIGIN ||
++          wp_type == perception_msgs::MapWaypoint::WAYPOINT_PARKING_SPOT);
++    return terminal_stop_go_sm::WaypointType::START;
++  }
++  if (wp_idx == num_wp - 1) {
++    CHECK(wp_type == perception_msgs::MapWaypoint::WAYPOINT_TRIP_DESTINATION ||
++          wp_type == perception_msgs::MapWaypoint::WAYPOINT_PARKING_SPOT);
++    return terminal_stop_go_sm::WaypointType::END;
++  }
++  if (wp_type == perception_msgs::MapWaypoint::WAYPOINT_STOP_LINE) {
++    return terminal_stop_go_sm::WaypointType::STOP_LINE;
++  }
++  return std::nullopt;
++}
++
++// Returns a straight line path in UTM coordinates starting from ego state and going straight ahead
++std::vector<Eigen::Vector3d> createStraightLinePath(const perception_msgs::EgoState ego_state)
++{
++  std::vector<Eigen::Vector3d> path;
++  Eigen::Vector3d ego_utm;
++  const map_utils::UtmZone zone = map_utils::getUtmZone(ego_state.latitude, ego_state.longitude);
++  map_utils::convertGpsToUtm(ego_state.latitude, ego_state.longitude, zone, &ego_utm[0], &ego_utm[1]);
++  const double ego_utm_theta = map_utils::getUtmTheta(zone, ego_state.heading, ego_state.latitude, ego_state.longitude);
++  ego_utm[2] = ego_utm_theta;
++  const Eigen::Vector3d offset = Eigen::Vector3d(std::cos(ego_utm_theta), std::sin(ego_utm_theta), 0.0);
++  for (size_t i = 0; i < 10; i++) {
++    path.push_back(ego_utm + i * offset);
++  }
++  return path;
++}
++
+ } // namespace
+ 
+ PlannerNode::PlannerNode(ros::NodeHandle* nh)
+@@ -136,10 +195,22 @@ void PlannerNode::runPlanner(const perception_msgs::Scene& scene_msg,
+     ROS_WARN_THROTTLE(1, "Lane change requested while lane changes are disabled. Ignoring request.");
+   }
+ 
++  // Update terminal state machine
++  evaluateTerminalState(scene_msg);
++
+   // load any maps that need loading, updates the mission route and updates the lane ID tracker
+   exec_timing.start("updateMaps", CALLER_INFO());
++  std::optional<std::vector<Eigen::Vector3d>> free_space_path = planner_->getFreeSpacePath();
++  if (!free_space_path &&
++      terminal_state_machine_->CurrentStateID() == terminal_sm::TerminalStateMachine::StateIndex::UNPARK) {
++    // If free space path not ready but in UNPARK, use straight line path for ego lane association
++    // TODO(xinda): add an unconnected lane per parking spot for correct ego lane association
++    free_space_path = createStraightLinePath(scene_msg.ego_state);
++  }
++  const std::vector<Eigen::Vector3d>* free_space_path_ptr =
++      free_space_path.has_value() ? &free_space_path.value() : nullptr;
+   std::unique_ptr<const Mappery> mappery = map_build::updateMapsAndBuildMappery(
+-      scene_msg.map, scene_msg.route, mission_, last_known_ego_lane_ref_, lane_id_tracker_);
++      scene_msg.map, scene_msg.route, mission_, last_known_ego_lane_ref_, lane_id_tracker_, free_space_path_ptr);
+   constexpr char ROUTE_DIAGNOSTIC[] = "Route";
+   if (mission_.getRouteID().empty()) {
+     constexpr char WAITING_FOR_ROUTE[] = "Waiting for route!";
+@@ -153,8 +224,9 @@ void PlannerNode::runPlanner(const perception_msgs::Scene& scene_msg,
+ 
+   // Generate scenery
+   exec_timing.start("buildPredictedScene", CALLER_INFO());
+-  const std::shared_ptr<const PredictedScene> scene =
+-      scene_builder_->buildPredictedScene(scene_msg, std::move(mappery), lane_id_tracker_, scene_building_options_);
++  const std::shared_ptr<const PredictedScene> scene = scene_builder_->buildPredictedScene(
++      scene_msg, std::move(mappery), lane_id_tracker_, speed_limit_tracker_, *terminal_state_machine_,
++      *terminal_stop_go_state_machine_, scene_building_options_);
+   constexpr char SCENE_VALIDITY_DIAGNOSTIC[] = "Scene";
+   if (scene == nullptr) {
+     // we could not build a valid scene
+@@ -164,6 +236,7 @@ void PlannerNode::runPlanner(const perception_msgs::Scene& scene_msg,
+     return;
+   }
+   node_diagnostics_publisher.ok(SCENE_VALIDITY_DIAGNOSTIC);
++
+   constexpr char EGO_LANE_DIAGNOSTIC[] = "Ego lane";
+   if (scene->getLaneGraph().getEgoLane() == nullptr) {
+     // scene has no ego lane - we require an ego lane to do valid work
+@@ -173,6 +246,17 @@ void PlannerNode::runPlanner(const perception_msgs::Scene& scene_msg,
+     return;
+   }
+   node_diagnostics_publisher.ok(EGO_LANE_DIAGNOSTIC);
++  constexpr char OUT_OF_ODD_DIAGNOSTIC[] = "Out Of ODD Object Detected";
++  const bool out_of_odd_disengagement = ros_params::getRequiredParam<bool>("out_of_odd_disengagement");
++  if (out_of_odd_disengagement && scene->containsOutOfOddObjects()) {
++    // Scene contains out of ODD object, we create a disengagement request through error
++    ROS_ERROR_STREAM("[Planner Node] Out of odd object detected, creating disengagement request.");
++    exec_timing.start("out of odd objects", CALLER_INFO());
++    exec_timing.error();
++    node_diagnostics_publisher.error(OUT_OF_ODD_DIAGNOSTIC, "Out of odd object detected.");
++    return;
++  }
++  node_diagnostics_publisher.ok(OUT_OF_ODD_DIAGNOSTIC);
+   exec_timing.stop();
+ 
+   auto planner_debug_info = std::make_unique<PlannerDebugInfo>();
+@@ -260,7 +344,7 @@ void PlannerNode::runPlanner(const perception_msgs::Scene& scene_msg,
+   }
+ 
+   /****************************************************************/
+-  /*** Planned succeeded, publish best trajectory for execution ***/
++  /*** Planner succeeded, publish best trajectory for execution ***/
+   /****************************************************************/
+   exec_timing.start("publishTrajectory", CALLER_INFO());
+   publishTrajectory(planner_->getBestTrajectory(), *scene);
+@@ -315,9 +399,9 @@ void PlannerNode::runPlanner(const perception_msgs::Scene& scene_msg,
+   /****************************************************************/
+   exec_timing.start("publishDebugMessages", CALLER_INFO());
+   const ActionTargetResult& best_trajectory = planner_->getBestTrajectory();
+-  const planning_msgs::PlannerInfo debug_msg =
+-      internal::addDebugMessages(*scene, *planner_debug_info, best_trajectory.longitudinal_trajectory,
+-                                 best_trajectory.lateral_trajectory, *best_trajectory.action_target);
++  const planning_msgs::PlannerInfo debug_msg = internal::addDebugMessages(
++      *scene, terminal_state_machine_->CurrentStateID(), *planner_debug_info, best_trajectory.longitudinal_trajectory,
++      best_trajectory.lateral_trajectory, *best_trajectory.action_target);
+   debug_pub_.publish(debug_msg);
+   exec_timing.stop();
+ 
+@@ -497,6 +581,103 @@ void PlannerNode::publishTrajectory(const ActionTargetResult& trajectory, const
+   trajectory_pub_->publish(trajectory_msg, CALLER_INFO());
+ }
+ 
++void PlannerNode::evaluateTerminalState(const perception_msgs::Scene& scene_msg)
++{
++  // No need to reinitialize every cycle because waypoints should not change
++  if (!terminal_state_machine_ || !terminal_stop_go_state_machine_) {
++    initializeTerminalStateMachine(scene_msg);
++  }
++
++  // Update terminal state machine
++  bool in_terminal = scene_msg.in_terminal_area_zone;
++  double speed = scene_msg.ego_state.speed;
++  double acceleration = scene_msg.ego_state.acceleration;
++  double travel = computeEgoTravelOnRoute(scene_msg.ego_state);
++  long timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(
++                       std::chrono::high_resolution_clock::now().time_since_epoch())
++                       .count();
++  bool free_space_plan_ready = planner_->isFreeSpacePlanReady();
++  terminal_state_machine_->Update({ in_terminal, speed, travel, free_space_plan_ready });
++  terminal_stop_go_state_machine_->Update({ speed, travel, timestamp });
++}
++
++void PlannerNode::initializeTerminalStateMachine(const perception_msgs::Scene& scene_msg)
++{
++  route_polyline_.clear();
++  route_travel_.clear();
++  double cumulative_travel = 0.0;
++  std::vector<terminal_sm::Waypoint> terminal_waypoints;
++  std::vector<terminal_stop_go_sm::Waypoint> terminal_stop_go_waypoints;
++
++  std::vector<perception_msgs::MapWaypoint> route_waypoints = scene_msg.route.waypoints;
++  size_t num_waypoints = route_waypoints.size();
++  for (size_t i = 0; i < num_waypoints; ++i) {
++    uint8_t wp_type = route_waypoints[i].waypoint_type;
++    std::optional<terminal_sm::WaypointType> planning_waypoint_type =
++        getTerminalPlanningWaypointType(i, num_waypoints, wp_type);
++    std::optional<terminal_stop_go_sm::WaypointType> stop_go_waypoint_type =
++        getTerminalStopGoWaypointType(i, num_waypoints, wp_type);
++
++    if (!planning_waypoint_type && !stop_go_waypoint_type) {
++      continue;
++    }
++
++    // Add terminal specific waypoints to state machines and polyline
++    Eigen::Vector3d point;
++    map_utils::UtmZone zone = map_utils::getUtmZone(route_waypoints[i].position.y, route_waypoints[i].position.x);
++    map_utils::convertGpsToUtm(route_waypoints[i].position.y, route_waypoints[i].position.x, zone, &point[0],
++                               &point[1]);
++    if (!route_polyline_.empty()) {
++      cumulative_travel += (point - route_polyline_.back()).norm();
++    }
++    route_polyline_.push_back(point);
++    route_travel_.push_back(cumulative_travel);
++
++    if (planning_waypoint_type.has_value()) {
++      terminal_waypoints.push_back(terminal_sm::Waypoint{ cumulative_travel, planning_waypoint_type.value() });
++    }
++    if (stop_go_waypoint_type.has_value()) {
++      terminal_stop_go_waypoints.push_back(
++          terminal_stop_go_sm::Waypoint{ route_waypoints[i].id, cumulative_travel, stop_go_waypoint_type.value() });
++    }
++  }
++
++  bool parked = scene_msg.ego_state.speed == 0.0 && scene_msg.ego_state.acceleration == 0.0;
++  // Assume for initial TerminalState, vehicle is not at handoff and at the first waypoint
++  terminal_state_machine_ = std::make_unique<terminal_sm::TerminalStateMachine>(
++      terminal_waypoints, terminal_sm::TerminalState{ parked, false, 0 });
++  terminal_stop_go_state_machine_ = std::make_unique<terminal_stop_go_sm::TerminalStopGoStateMachine>(
++      terminal_stop_go_waypoints, terminal_stop_go_sm::TerminalState{ 0, 0, false });
++}
++
++double PlannerNode::computeEgoTravelOnRoute(const perception_msgs::EgoState& ego_state) const
++{
++  // Project ego location onto route polyline
++  Eigen::Vector3d ego_position;
++  map_utils::UtmZone zone = map_utils::getUtmZone(ego_state.latitude, ego_state.longitude);
++  map_utils::convertGpsToUtm(ego_state.latitude, ego_state.longitude, zone, &ego_position[0], &ego_position[1]);
++  const auto closest_point = utils_polyline::closestPointOnPolyLine(route_polyline_, ego_position);
++
++  size_t closest_idx = closest_point.point_index;
++  double segment_travel_normalized = closest_point.location;
++
++  /* Projection before start */
++  if (segment_travel_normalized < 0.0) {
++    CHECK(closest_idx == 0);
++    return route_travel_[0];
++  }
++
++  /* Projection after end */
++  if (segment_travel_normalized > 1.0) {
++    CHECK(closest_idx == route_travel_.size() - 1);
++    return route_travel_[route_travel_.size() - 1];
++  }
++
++  double segment_travel =
++      segment_travel_normalized * (route_polyline_[closest_idx + 1] - route_polyline_[closest_idx]).norm();
++  return route_travel_[closest_idx] + segment_travel;
++}
++
+ namespace internal {
+ void publishLaneInfoMessage(const PredictedScene& scene, ros::Publisher* lane_info_pub)
+ {
+@@ -542,7 +723,8 @@ void publishLaneInfoMessage(const PredictedScene& scene, ros::Publisher* lane_in
+   lane_info_pub->publish(lane_information);
+ }
+ 
+-planning_msgs::PlannerInfo addDebugMessages(const PredictedScene& scene, const PlannerDebugInfo& planner_debug_info,
++planning_msgs::PlannerInfo addDebugMessages(const PredictedScene& scene, int terminal_state,
++                                            const PlannerDebugInfo& planner_debug_info,
+                                             const LongitudinalTrajectoryResult& best_longitudinal_trajectory,
+                                             const LateralTrajectoryResult& best_lateral_trajectory,
+                                             const ActionTarget& chosen_action_target)
+@@ -626,6 +808,7 @@ planning_msgs::PlannerInfo addDebugMessages(const PredictedScene& scene, const P
+     tgv2_debug_msg.runtimes.push_back(runtime);
+   }
+   debug.tgv2_runtimes = tgv2_debug_msg;
++  debug.terminal_state = terminal_state;
+ 
+   return debug;
+ }
+diff --git a/planning/planner/src/planner.cpp b/planning/planner/src/planner.cpp
+index 5f1b80dd2..64a671249 100644
+--- a/planning/planner/src/planner.cpp
++++ b/planning/planner/src/planner.cpp
+@@ -12,6 +12,7 @@
+ #include "planning_common/math/frenet_transformations.h"
+ #include "planning_common/types/scene_info_tg.h"
+ #include "planning_msgs/DriverAlert.h"
++#include "terminal_state_machine/terminal_state_machine.h"
+ #include "trajectory_generation_v2/utils/logger.h"
+ #include "utils/map/utils.h"
+ #include "utils/serialization/fast_json_archive.h"
+@@ -26,6 +27,7 @@ namespace planning {
+ Planner::Planner(ros::NodeHandle* nh, std::shared_ptr<DriverAlerts> driver_alerts,
+                  std::shared_ptr<TruckFunctions> truck_function_interface)
+   : behavior_planner_(nh, driver_alerts, truck_function_interface)
++  , terminal_planner_(nh, driver_alerts, truck_function_interface)
+   , teleop_planner_(nh, driver_alerts)
+   , trajectory_planner_v2_(tgv2::TrajectoryGeneratorConfig{})
+   , driver_alerts_(driver_alerts)
+@@ -39,6 +41,7 @@ void Planner::setParams(const PlannerParameters& params)
+   planner_params_ = params;
+ 
+   behavior_planner_.setParams(planner_params_);
++  terminal_planner_.setParams(planner_params_);
+   teleop_planner_.setParams(planner_params_);
+   trajectory_planner_v2_.setParams(planner_params_);
+   initializer_.setParams(planner_params_);
+@@ -62,6 +65,7 @@ const PlannerParameters& Planner::getParams() const
+ void Planner::reset()
+ {
+   behavior_planner_.reset();
++  terminal_planner_.reset();
+   initializer_ = Initializer(planner_params_);
+   tg_initialized_ = false;
+ }
+@@ -91,6 +95,16 @@ LateralTrajectoryResult& Planner::getBestLateralTrajectory()
+   return best_trajectory_.lateral_trajectory;
+ }
+ 
++bool Planner::isFreeSpacePlanReady() const
++{
++  return free_space_plan_ready_;
++}
++
++std::optional<std::vector<Eigen::Vector3d>> Planner::getFreeSpacePath() const
++{
++  return terminal_planner_.getFreeSpacePath();
++}
++
+ bool Planner::runPlanningCycle(const std::shared_ptr<const PredictedScene>& scene, const SourceFrame& source_frame,
+                                const SituationConstraints& situation_constraints,
+                                const OperationalDomain& operational_domain, PlannerDebugInfo* debug_info,
+@@ -116,12 +130,16 @@ bool Planner::runPlanningCycle(const std::shared_ptr<const PredictedScene>& scen
+   /****************************************************************/
+   exec_timing.start("behaviorPlannerPlanActionTargets", CALLER_INFO());
+   std::unordered_map<BehaviorType, ActionTarget> action_target_per_behavior;
+-  if (!scene->isTeleopActive()) {
+-    action_target_per_behavior = behavior_planner_.planActionTargets(situation_constraints, scene, operational_domain,
+-                                                                     &debug_info->behavior_planner_debug_info);
+-  } else {
++  if (scene->isTeleopActive()) {
+     action_target_per_behavior[BehaviorType::TELEOP] =
+         teleop_planner_.getActionTarget(situation_constraints, *scene, &debug_info->behavior_planner_debug_info);
++  } else if (terminal_sm::TerminalStateMachine::IsTerminalPlanningActive(scene->getTerminalPlanningState())) {
++    action_target_per_behavior =
++        terminal_planner_.planActionTargets(situation_constraints, scene, operational_domain,
++                                            &debug_info->behavior_planner_debug_info, free_space_plan_ready_);
++  } else {
++    action_target_per_behavior = behavior_planner_.planActionTargets(situation_constraints, scene, operational_domain,
++                                                                     &debug_info->behavior_planner_debug_info);
+   }
+ 
+   if (action_target_per_behavior.empty()) {
+@@ -129,6 +147,10 @@ bool Planner::runPlanningCycle(const std::shared_ptr<const PredictedScene>& scen
+     return false;
+   }
+ 
++  if (!terminal_sm::TerminalStateMachine::IsTerminalPlanningActive(scene->getTerminalPlanningState())) {
++    free_space_plan_ready_ = false; // Reset free space plan ready flag when not in terminal planning
++  }
++
+   exec_timing.start("constructSceneInfoTG", CALLER_INFO());
+   SceneInfoTG scene_info = constructSceneInfoTG(*scene);
+ 
+diff --git a/planning/planner/src/planner_viz_publisher.cpp b/planning/planner/src/planner_viz_publisher.cpp
+index f7f7ed7d1..d8196f92c 100644
+--- a/planning/planner/src/planner_viz_publisher.cpp
++++ b/planning/planner/src/planner_viz_publisher.cpp
+@@ -41,4 +41,4 @@ LaneIDTracker PlannerVizPublisher::moveTracker()
+   return std::move(tracker_);
+ }
+ 
+-} // namespace planning
+\ No newline at end of file
++} // namespace planning

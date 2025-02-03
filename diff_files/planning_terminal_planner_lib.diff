@@ -1,0 +1,1305 @@
+diff --git a/planning/terminal_planner_libs/BUILD b/planning/terminal_planner_libs/BUILD
+index 1c46ea022..935096eee 100644
+--- a/planning/terminal_planner_libs/BUILD
++++ b/planning/terminal_planner_libs/BUILD
+@@ -10,6 +10,9 @@ cc_library(
+     includes = ["include"],
+     visibility = ["//visibility:public"],
+     deps = [
++        "//common/adk_standards",
++        "//common/utils_math",
++        "//planning/planning_common",
+         "@eigen",
+     ],
+ )
+diff --git a/planning/terminal_planner_libs/CMakeLists.txt b/planning/terminal_planner_libs/CMakeLists.txt
+index 523256fd7..9fc276c44 100644
+--- a/planning/terminal_planner_libs/CMakeLists.txt
++++ b/planning/terminal_planner_libs/CMakeLists.txt
+@@ -11,13 +11,14 @@ set(CATKIN_COMPONENTS
+     roslib
+     roscpp
+     adk_standards
++    planning_common
++    utils_math
+ )
+ 
+ find_package(catkin REQUIRED COMPONENTS ${CATKIN_COMPONENTS})
+ find_package(Eigen3 REQUIRED)
+ find_package(Boost REQUIRED COMPONENTS)
+ find_package(rosunit REQUIRED)
+-find_package(adk_standards REQUIRED COMPONENTS)
+ 
+ set(PYBIND11_PYTHON_VERSION 3.8.10)
+ find_package(pybind11 REQUIRED)
+@@ -32,6 +33,7 @@ catkin_package(
+ 
+ set(PROJECT_INCLUDE_DIRS ${EIGEN3_INCLUDE_DIRS} ${Boost_INCLUDE_DIRS})
+ include_directories(${PROJECT_INCLUDE_DIRS})
++include_directories(${PROJECT_SOURCE_DIR}/include)
+ include_directories(${PROJECT_SOURCE_DIR}/include/${PROJECT_NAME})
+ include_directories(${catkin_INCLUDE_DIRS})
+ include_directories(${PYTHON_INCLUDE_DIRS} ${PROJECT_SOURCE_DIR}/include)
+@@ -47,6 +49,7 @@ add_library(terminal_planner_libs
+     src/free_space_planner/geometric_vector2d.cpp
+     src/free_space_planner/maneuver.cpp
+     src/free_space_planner/free_space_planner.cpp
++    src/terminal_behavior_helpers.cpp
+ )
+ 
+ target_link_libraries(terminal_planner_libs PUBLIC
+@@ -61,7 +64,7 @@ if(CATKIN_ENABLE_TESTING)
+ endif()
+ 
+ 
+-# Install 
++# Install
+ 
+ install(DIRECTORY include/${PROJECT_NAME}/
+   DESTINATION ${CATKIN_PACKAGE_INCLUDE_DESTINATION}
+@@ -84,5 +87,3 @@ set_target_properties(terminal_planner_py
+ install(TARGETS terminal_planner_py
+   ARCHIVE DESTINATION ${CATKIN_PACKAGE_PYTHON_DESTINATION}
+   LIBRARY DESTINATION ${CATKIN_PACKAGE_PYTHON_DESTINATION})
+-  
+-  
+diff --git a/planning/terminal_planner_libs/README.md b/planning/terminal_planner_libs/README.md
+index 8b1378917..11f88117c 100644
+--- a/planning/terminal_planner_libs/README.md
++++ b/planning/terminal_planner_libs/README.md
+@@ -1 +1,29 @@
++# Terminal Planner Library
+ 
++## Piano Mover
++This class implements the free space planner described in: https://arxiv.org/abs/2306.01301.
++
++In Piano Mover, the actor has 6 possible maneuver types specified in `ManeuverType`. In our case for trucks, we do not allow reverse maneuvers, so the only 3 we care about are `FORWARD_STRAIGHT`, `FORWARD_CW` (right turn), and `FORWARD_CCW` (left turn). Given a costmap and free space parameters, the Piano Mover finds the optimal path of maneuvers, each consisting of maneuver type and maneuver end pose.
++
++To use Piano Mover, first run `GoalSearch` to find the goal state with optimal cost. Then, run `BackTrack` on the searched goal to backtrack the whole optimal path.
++
++## Free Space Planner
++This class is used by the planner directly to plan a path through free space.
++
++The `plan` function takes in a start and end pose, and outputs a vector of paths for alternating maneuver directions. It uses `PianoMover` to plan maneuvers, then post-processes and expands the maneuvers into dense paths of points.
++
++`FreeSpacePlannerParameters` specifies all the parameters the free space planner uses. They need to be tuned for the specific vehicle and ODD for the planner to work correctly.
++
++### Free Space Planner Notebook
++The `free_space_planner.ipynb` notebook is an important tool for developing and tuning the free space planner. The c++ pybinds in `terminal_planner_py.cpp` are required to run the notebook.
++
++In the notebook, we can visualize the 2D costmap and configuration space costmap to make sure they align with what the Ego perceives from maps and perception. Please utilize `Save` and `Load` functions of the costmap for easier debugging.
++
++We can also run free space planner and plot the output path on top of the costmap to make sure we're computing the optimal path.
++
++To launch the notebook, the easiest way is attach VSCode to the `brain` docker container, then run `jupyter notebook` inside VSCode command line. VSCode will help port forward the notebook server to your local machine.
++
++## Terminal Behavior Helpers
++`terminal_behavior_helpers.h` contains a lot of common helper functions for parking and unparking behaviors.
++
++See function header comments for more detail.
+diff --git a/planning/terminal_planner_libs/include/free_space_planner/distance.h b/planning/terminal_planner_libs/include/free_space_planner/distance.h
+index 99bfe226e..e15b324bc 100644
+--- a/planning/terminal_planner_libs/include/free_space_planner/distance.h
++++ b/planning/terminal_planner_libs/include/free_space_planner/distance.h
+@@ -39,4 +39,15 @@ double Distance(const Pose2D& p1, const Pose2D& p2);
+  */
+ double Distance(const Vector2d& point, const Vector2d& segment_start, const Vector2d& segment_end);
+ 
++/**
++ * @brief Compute the closest point on a segment to a given point.
++ *
++ * @param point Point.
++ * @param segment_start Start of the segment.
++ * @param segment_end End of the segment.
++ * @return The closest point on the segment and the distance to the point.
++ */
++std::pair<Vector2d, double> ClosestPoint(const Vector2d& point, const Vector2d& segment_start,
++                                         const Vector2d& segment_end);
++
+ } // namespace planning
+diff --git a/planning/terminal_planner_libs/include/free_space_planner/free_space_planner.h b/planning/terminal_planner_libs/include/free_space_planner/free_space_planner.h
+index 316ddc1f8..9e8a73aaa 100644
+--- a/planning/terminal_planner_libs/include/free_space_planner/free_space_planner.h
++++ b/planning/terminal_planner_libs/include/free_space_planner/free_space_planner.h
+@@ -1,5 +1,6 @@
+ #pragma once
+ 
++#include <cmath>
+ #include <cstddef>
+ 
+ #include "free_space_planner/maneuver.h"
+@@ -20,15 +21,15 @@ const EgoFootprint TRUCK_301{
+  */
+ struct FreeSpacePlannerParameters
+ {
+-  float turning_radius{ 6.0 };  // turning radius of the vehicle [meters]
+-  float transition_cost{ 0.1 }; // cost of transitioning between different maneuvers
+-  int iterations{ 2 };          // number of iterations for the piano mover planner
+-  float search_radius{ 1.0 };   // search radius to use for improved goal search [meters]
+-  float cell_size{ 0.3 };       // size of a cell in the costmap [meters]
+-  int space_dim_size{ 128 };    // size of the space dimension in the costmap
+-  int angle_dim_size{ 128 };    // size of the angle dimension in the costmap
+-  float weight1{ 2.0 };         // weight for the distance cost in the goal search algorithm
+-  float weight2{ 2.0 };         // weight for the heading cost in the goal search algorithm
++  float turning_radius{ NAN };  // turning radius of the vehicle [meters]
++  float transition_cost{ NAN }; // cost of transitioning between different maneuvers
++  int iterations{ -1 };         // number of iterations for the piano mover planner
++  float search_radius{ NAN };   // search radius to use for improved goal search [meters]
++  float cell_size{ NAN };       // size of a cell in the costmap [meters]
++  int space_dim_size{ -1 };     // size of the space dimension in the costmap
++  int angle_dim_size{ -1 };     // size of the angle dimension in the costmap
++  float weight1{ NAN };         // weight for the distance cost in the goal search algorithm
++  float weight2{ NAN };         // weight for the heading cost in the goal search algorithm
+ };
+ 
+ /**
+diff --git a/planning/terminal_planner_libs/include/free_space_planner/rasterization.h b/planning/terminal_planner_libs/include/free_space_planner/rasterization.h
+new file mode 100644
+index 000000000..e19ca01ba
+--- /dev/null
++++ b/planning/terminal_planner_libs/include/free_space_planner/rasterization.h
+@@ -0,0 +1,267 @@
++#pragma once
++
++#include <Eigen/Dense>
++#include <cmath>
++#include <type_traits>
++#include <unordered_set>
++#include <vector>
++
++#include "adk_macros/check.h"
++#include "free_space_planner/geometric_vector2d.h"
++
++namespace planning {
++
++namespace rasterization_lib {
++/**
++ * @brief Check if the intersection point is within the start and end points.
++ *
++ * @param intersection Intersection point of the line segment with the boundary.
++ * @param start Start point of the line segment.
++ * @param end End point of the line segment.
++ * @return true If the intersection point is within the start and end points.
++ * @return false If the intersection point is not within the start and end points.
++ */
++inline bool checkIntersectionWithinStartEnd(const Eigen::Vector2d& intersection, const Eigen::Vector2d& start,
++                                            const Eigen::Vector2d& end)
++{
++  return (intersection[0] >= std::min(start[0], end[0]) && intersection[0] <= std::max(start[0], end[0]) &&
++          intersection[1] >= std::min(start[1], end[1]) && intersection[1] <= std::max(start[1], end[1]));
++}
++
++/**
++ * @brief Get the intersection points of the line segment with the boundary.
++ *
++ * @param line_segment Line segment to check for intersection with the boundary.
++ * @param rows Number of rows for the 1-D buffer.
++ * @param columns Number of columns for the 1-D buffer.
++ * @return std::vector<Eigen::Vector2d> Intersection points of the line segment with the boundary.
++ */
++inline std::vector<Eigen::Vector2d> getIntersectionsWithBoundary(const GeometricVector2d& line_segment, int rows,
++                                                                 int columns)
++{
++  Eigen::Vector2d top_left(0, 0);
++  Eigen::Vector2d top_right(columns, 0);
++  Eigen::Vector2d bottom_left(0, rows);
++  Eigen::Vector2d bottom_right(columns, rows);
++  std::vector<Eigen::Vector2d> boundaries = { top_left, top_right, bottom_right, bottom_left };
++
++  std::vector<Eigen::Vector2d> intersections;
++  std::vector<Eigen::Vector2d> intersections_result;
++
++  for (std::size_t i = 0; i < boundaries.size(); ++i) {
++    Eigen::Vector2d start_point = boundaries[i];
++    Eigen::Vector2d end_point = boundaries[(i + 1) % boundaries.size()];
++    std::optional<Eigen::Vector2d> intersection =
++        line_segment.Intersection(GeometricVector2d(start_point, end_point - start_point));
++    if (!intersection) {
++      continue;
++    }
++    if (checkIntersectionWithinStartEnd(intersection.value(), start_point, end_point) &&
++        checkIntersectionWithinStartEnd(intersection.value(), line_segment.origin(),
++                                        line_segment.origin() + line_segment.direction())) {
++      // Only add the intersection point if it is within the start and end points of the line segment and the boundary
++      intersections.push_back(intersection.value());
++    }
++  }
++
++  // Keep a set of unique intersection points to return, checking each point by floating point comparison
++  // Duplicate intersection can occur when line segment intersects with corner of the boundary
++  for (const auto& intersection : intersections) {
++    bool is_unique = true;
++    for (const auto& intersection_result : intersections_result) {
++      if (std::abs(intersection[0] - intersection_result[0]) < 1e-6 &&
++          std::abs(intersection[1] - intersection_result[1]) < 1e-6) {
++        is_unique = false;
++      }
++    }
++    if (!is_unique) {
++      continue;
++    }
++    intersections_result.push_back(intersection);
++  }
++
++  return intersections_result;
++}
++
++/**
++ * @brief Check if the line segment is within the boundary or intersects with the boundary.
++ * If the line segment is within the boundary, return the start and end points.
++ * If the line segment intersects with the boundary, return the intersection points.
++ *
++ * @param start Start point of the line segment.
++ * @param end End point of the line segment.
++ * @param rows Number of rows for the 1-D buffer.
++ * @param columns Number of columns for the 1-D buffer.
++ * @return std::optional<std::pair<Eigen::Vector2d, Eigen::Vector2d>> Start and end points of the line segment if the
++ * line segment is within the boundary. Intersection points of the line segment with the boundary if the line segment
++ * intersects with the boundary.
++ */
++inline std::optional<std::pair<Eigen::Vector2d, Eigen::Vector2d>>
++checkPointInBoundsOrIntersection(const Eigen::Vector2d& start, const Eigen::Vector2d& end, int rows, int columns)
++{
++  // If both of the points are within the boundary, return the points
++  if ((start[0] >= 0 && start[0] < columns && start[1] >= 0 && start[1] < rows) &&
++      (end[0] >= 0 && end[0] < columns && end[1] >= 0 && end[1] < rows)) {
++    return std::make_pair(start, end);
++  }
++
++  // If only the start point is within the boundary, return the start point and the intersection point of the line
++  // segment with the boundary
++  if (start[0] >= 0 && start[0] < columns && start[1] >= 0 && start[1] < rows) {
++    const Eigen::Vector2d direction = end - start;
++    GeometricVector2d line_segment(start, direction);
++    std::vector<Eigen::Vector2d> end_intersection = getIntersectionsWithBoundary(line_segment, rows, columns);
++    CHECK(end_intersection.size() == 1);
++    return std::make_pair(start, end_intersection[0]);
++  }
++
++  // If only the end point is within the boundary, return the intersection point of the line segment with the boundary
++  // and the end point
++  if (end[0] >= 0 && end[0] < columns && end[1] >= 0 && end[1] < rows) {
++    Eigen::Vector2d direction = start - end;
++    GeometricVector2d line_segment(end, direction);
++    std::vector<Eigen::Vector2d> start_intersection = getIntersectionsWithBoundary(line_segment, rows, columns);
++    CHECK(start_intersection.size() == 1);
++    return std::make_pair(start_intersection[0], end);
++  }
++
++  // If both of the points are outside the boundary, return the intersection points of the line segment with the
++  // boundary if it exists
++  Eigen::Vector2d direction = end - start;
++  GeometricVector2d line_segment(start, direction);
++  std::vector<Eigen::Vector2d> intersections = getIntersectionsWithBoundary(line_segment, rows, columns);
++  if (intersections.size() == 2) {
++    return std::make_pair(intersections[0], intersections[1]);
++  }
++
++  // Check if the line segment intersects with the boundary
++  return std::nullopt;
++}
++
++template <typename T>
++void rasterizeLineSegmentLow(int x0, int y0, int x1, int y1, const int rows, const int columns, std::vector<T>& buffer,
++                             T fill_value)
++{
++  int dx = x1 - x0;
++  int dy = y1 - y0;
++  int yi = 1;
++  if (dy < 0) {
++    yi = -1;
++    dy = -dy;
++  }
++  int D = 2 * dy - dx;
++  int y = y0;
++  for (int x = x0; x <= x1; x++) {
++    // If the point is out of range, do not update the buffer.
++    if (x >= 0 && y >= 0 && x < columns && y < rows) {
++      int idx = y * columns + x;
++      buffer[idx] = fill_value;
++    }
++    if (D > 0) {
++      y += yi;
++      D -= 2 * dx;
++    }
++    D += 2 * dy;
++  }
++}
++
++template <typename T>
++void rasterizeLineSegmentHigh(int x0, int y0, int x1, int y1, const int rows, const int columns, std::vector<T>& buffer,
++                              T fill_value)
++{
++  int dx = x1 - x0;
++  int dy = y1 - y0;
++  int xi = 1;
++  if (dx < 0) {
++    xi = -1;
++    dx = -dx;
++  }
++  int D = 2 * dx - dy;
++  int x = x0;
++  for (int y = y0; y <= y1; y++) {
++    // If the point is out of range, do not update the buffer.
++    if (x >= 0 && y >= 0 && x < columns && y < rows) {
++      int idx = y * columns + x;
++      buffer[idx] = fill_value;
++    }
++    if (D > 0) {
++      x += xi;
++      D -= 2 * dy;
++    }
++    D += 2 * dx;
++  }
++}
++
++} // namespace rasterization_lib
++
++/**
++ * @brief Rasterize a given line segment using Bresenham's line algorithm.
++ * Line segment is defined by two points (x0, y0) and (x1, y1).
++ * Link: https://en.wikipedia.org/wiki/Bresenham%27s_line_algorithm
++ *
++ * @param x0 First point x-coordinate.
++ * @param y0 First point y-coordinate.
++ * @param x1 Second point x-coordinate.
++ * @param y1 Second point y-coordinate.
++ * @param rows Number of rows for the 1-D buffer.
++ * @param columns Number of columns for the 1-D buffer.
++ * @param buffer 2-D matrix flattened to 1-D buffer, holds updated values from line segment.
++ * @param fill_value Fill value used to fill the buffer for a given line segment.
++ * @return std::vector<std::pair<int, int> > List of points in the line segment.
++ */
++template <typename T,
++          typename std::enable_if<std::is_integral<T>::value || std::is_floating_point<T>::value, int>::type = 0>
++void rasterizeLineSegment(const Eigen::Vector2d& start, const Eigen::Vector2d& end, const int rows, const int columns,
++                          std::vector<T>& buffer, T fill_value)
++{
++  // Check If the Line Segment Exists Within the Boundary or Intersects with the Boundary
++  std::optional<std::pair<Eigen::Vector2d, Eigen::Vector2d>> segment =
++      rasterization_lib::checkPointInBoundsOrIntersection(start, end, rows, columns);
++  if (!segment.has_value()) {
++    std::cerr << "Line segment does not exist within the boundary or intersect with the boundary" << std::endl;
++    return;
++  }
++
++  const int x0 = segment.value().first[0];
++  const int y0 = segment.value().first[1];
++  const int x1 = segment.value().second[0];
++  const int y1 = segment.value().second[1];
++  if (std::abs(y1 - y0) < std::abs(x1 - x0)) {
++    if (x0 > x1) {
++      rasterization_lib::rasterizeLineSegmentLow<T>(x1, y1, x0, y0, rows, columns, buffer, fill_value);
++    } else {
++      rasterization_lib::rasterizeLineSegmentLow<T>(x0, y0, x1, y1, rows, columns, buffer, fill_value);
++    }
++  } else {
++    if (y0 > y1) {
++      rasterization_lib::rasterizeLineSegmentHigh<T>(x1, y1, x0, y0, rows, columns, buffer, fill_value);
++    } else {
++      rasterization_lib::rasterizeLineSegmentHigh<T>(x0, y0, x1, y1, rows, columns, buffer, fill_value);
++    }
++  }
++}
++
++/**
++ * @brief Rasterize a given list of line segments.
++ * Line segments are defined by a list of points.
++ *
++ * @param line_segments List of points defining the line segments.
++ * @param rows Number of rows for the 1-D buffer.
++ * @param columns Number of columns for the 1-D buffer.
++ * @param buffer 2-D matrix flattened to 1-D buffer, holds updated values from line segments.
++ * @param fill_value Fill value used to fill the buffer for a given line segment.
++ */
++template <typename T,
++          typename std::enable_if<std::is_integral<T>::value || std::is_floating_point<T>::value, int>::type = 0>
++void rasterizeLineSegments(const std::vector<Eigen::Vector2d>& line_segments, const int rows, const int columns,
++                           std::vector<T>& buffer, T fill_value)
++{
++  for (size_t i = 0; i < line_segments.size(); i++) {
++    Eigen::Vector2d const& start = line_segments[i];
++    Eigen::Vector2d const& end = line_segments[(i + 1) % line_segments.size()];
++    rasterizeLineSegment<T>(start, end, rows, columns, buffer, fill_value);
++  }
++}
++
++
++} // namespace planning
+diff --git a/planning/terminal_planner_libs/include/piano_mover/discretization_data.h b/planning/terminal_planner_libs/include/piano_mover/discretization_data.h
+index 9fe5492ec..b2b7c7cf8 100644
+--- a/planning/terminal_planner_libs/include/piano_mover/discretization_data.h
++++ b/planning/terminal_planner_libs/include/piano_mover/discretization_data.h
+@@ -51,22 +51,22 @@ struct DiscretizationData final
+     return (swap ? Id(y, x, t) : Id(x, y, t));
+   }
+ 
+-  float turning_radius; /**< Minimum turning radius for the mobile robot [meters] */
+-  float cell_size;      /**< Cell size for the underlying spatial discretization [meters] */
++  float turning_radius;   /**< Minimum turning radius for the mobile robot [meters] */
++  float cell_size;        /**< Cell size for the underlying spatial discretization [meters] */
+ 
+-  int space_dim_size; /**< Number of cells per side in the spatial dimension. Has to be a power of 2  */
+-  int angle_dim_size; /**<  Number of cells in the angular dimension. Has to be a power of 2*/
++  int space_dim_size;     /**< Number of cells per side in the spatial dimension. Has to be a power of 2  */
++  int angle_dim_size;     /**<  Number of cells in the angular dimension. Has to be a power of 2*/
+ 
+   int spatial_slice_size; /**< Number of cells in a spatial slice */
+   int volume_size;        /**< Number of cells in the discretized configuration space */
+   int log_space;          /**< Logarithm of the number of cells per side in the spatial dimension */
+ 
+-  float delta_angle;    /**< Angular resolution of the discretization [radians] */
+-  float turning_length; /**< Arc length of full turning motion for one cell [meters] */
++  float delta_angle;      /**< Angular resolution of the discretization [radians] */
++  float turning_length;   /**< Arc length of full turning motion for one cell [meters] */
+ 
+-  int quarter_circle; /**< Number of cells in a quarter circle (pi / 2 radians)*/
++  int quarter_circle;     /**< Number of cells in a quarter circle (pi / 2 radians)*/
+ 
+-  int fp_factor_log; /**< Logarithm of the fixed point factor */
++  int fp_factor_log;      /**< Logarithm of the fixed point factor */
+ 
+   // Lookup tables
+   std::vector<int> sin_lut;           /**< Lookup table for sin values */
+@@ -76,9 +76,9 @@ struct DiscretizationData final
+   // Additional views for LUTs
+   // TODO: Consider using boost::span instead of naked pointers. This would require updating
+   // the boost version currently used by ADK
+-  int* cos_lut;       /**< Lookup table for cos values */
+-  int* minus_sin_lut; /**< Lookup table for -sin values */
+-  int* minus_cos_lut; /**< Lookup table for -cos values */
++  int* cos_lut;         /**< Lookup table for cos values */
++  int* minus_sin_lut;   /**< Lookup table for -sin values */
++  int* minus_cos_lut;   /**< Lookup table for -cos values */
+ 
+   int* negative_length; /**< Lookup table for negative x increment per heading */
+   int* swap_axes;       /**< Lookup table to indicate angle queries that require swapping axes */
+diff --git a/planning/terminal_planner_libs/include/state_machine/state_machine.h b/planning/terminal_planner_libs/include/state_machine/state_machine.h
+index e20a3ae52..8902b44ee 100644
+--- a/planning/terminal_planner_libs/include/state_machine/state_machine.h
++++ b/planning/terminal_planner_libs/include/state_machine/state_machine.h
+@@ -21,8 +21,8 @@ class FSMState
+   virtual ~FSMState() = default;
+ 
+   // Can be used to modify the state upon entering and exiting the state.
+-  virtual void OnEnter() {};
+-  virtual void OnExit() {};
++  virtual void OnEnter(){};
++  virtual void OnExit(){};
+ 
+   // Updating the state returns an integer which essentially expresses an edge
+   // with no successor state. The output can be used to connect the state to
+diff --git a/planning/terminal_planner_libs/include/terminal_behavior_helpers.h b/planning/terminal_planner_libs/include/terminal_behavior_helpers.h
+new file mode 100644
+index 000000000..e860ed7e2
+--- /dev/null
++++ b/planning/terminal_planner_libs/include/terminal_behavior_helpers.h
+@@ -0,0 +1,88 @@
++#ifndef PLANNING_TERMINAL_BEHAVIOR_HELPERS_H_
++#define PLANNING_TERMINAL_BEHAVIOR_HELPERS_H_
++
++#include <Eigen/Core>
++#include <cmath>
++#include <optional>
++#include <string>
++#include <vector>
++
++#include "free_space_planner/free_space_planner.h"
++#include "free_space_planner/types.h"
++#include "planning_common/types/reference_line.h"
++#include "terminal_map_server/terminal_mappery/terminal_mappery.h"
++
++
++namespace planning {
++
++/**
++ * @brief Parameters for the Terminal Planner
++ */
++struct TerminalPlannerParams
++{
++  float transform_min_cost{ NAN };                     // Minimum cost for the distance transform
++  float transform_max_cost_parking_spot{ NAN };        // Maximum cost for the distance transform for parking spot
++  float transform_max_cost_static_obstacle{ NAN };     // Maximum cost for the distance transform for static obstacle
++  float transform_scale_cost{ NAN };                   // Scale for the distance transform
++  double costmap_longitudinal_margin{ NAN };           // Longitudinal Offset in CostMap2D [meters]
++  double free_space_path_extend_distance{ NAN };       // Extension distance of the free space path [meters]
++  double free_space_path_extend_delta_distance{ NAN }; // Distance between each point for extension of the free space
++                                                       // path [meters]
++};
++
++/**
++ * @brief Build a spline reference line from a path.
++ *
++ * @param path The path of Pose2D points to build the spline reference line from.
++ * @param ego_theta The theta of ego vehicle in radians
++ * @return The spline reference line or std::nullopt if the spline could not be built.
++ */
++std::optional<ReferenceLine> buildSplineReferenceLine(const std::vector<Pose2D>& path, double ego_theta);
++
++/**
++ * @brief Plan a path through free space
++ *
++ * @param free_space_planner_params Parameters for the free space planner
++ * @param ego_footprint Ego footprint of the vehicle
++ * @param terminal_planner_params Parameters for the terminal planner
++ * @param free_space_planner Free space planner
++ * @param terminal_map Terminal mappery
++ * @param start Start pose
++ * @param goal Goal pose
++ * @return std::vector<Pose2D> The planned path of Pose2D points
++ */
++std::vector<Pose2D> planFreeSpacePath(const FreeSpacePlannerParameters& free_space_planner_params,
++                                      const EgoFootprint& ego_footprint,
++                                      const TerminalPlannerParams& terminal_planner_params,
++                                      FreeSpacePlanner& free_space_planner, const TerminalMappery& terminal_map,
++                                      const Pose2D& start, const Pose2D& goal);
++/**
++ * @brief Rasterize the cost map for the scene
++ *
++ * @return std::vector<float> the rasterized cost map
++ */
++std::vector<float> rasterizeCostMap(const FreeSpacePlannerParameters& free_space_planner_params,
++                                    const TerminalPlannerParams& terminal_planner_params,
++                                    const TerminalMappery& terminal_map, const double offset_x, const double offset_y);
++
++/**
++ * @brief Convert GCS Location to UTM
++ *
++ * @param gcs_location GCS Location
++ * @return Eigen::Vector3d of UTM X, UTM Y, UTM theta
++ */
++Eigen::Vector3d convertGcsLocationToUtm(const GCSLocation& gcs_location);
++
++/**
++ * @brief Transform pose to a new coordinate frame
++ *
++ * @param dx translation in x
++ * @param dy translation in y
++ * @param d_theta rotation in radians
++ * @return Transformed pose
++ */
++Pose2D transformPoseCoordinateFrame(const Pose2D& pose, const double dx, const double dy, const double d_theta);
++
++} // namespace planning
++
++#endif // PLANNING_TERMINAL_BEHAVIOR_HELPERS_H_
+diff --git a/planning/terminal_planner_libs/notebooks/free_space_planner.ipynb b/planning/terminal_planner_libs/notebooks/free_space_planner.ipynb
+index 48b8fc2df..9536a7452 100644
+--- a/planning/terminal_planner_libs/notebooks/free_space_planner.ipynb
++++ b/planning/terminal_planner_libs/notebooks/free_space_planner.ipynb
+@@ -70,23 +70,23 @@
+   },
+   {
+    "cell_type": "code",
+-   "execution_count": 4,
++   "execution_count": 15,
+    "id": "195dbaf7",
+    "metadata": {},
+    "outputs": [
+     {
+      "data": {
+       "text/plain": [
+-       "<matplotlib.image.AxesImage at 0x7fd9a3094d30>"
++       "<matplotlib.image.AxesImage at 0x7efc357af4c0>"
+       ]
+      },
+-     "execution_count": 4,
++     "execution_count": 15,
+      "metadata": {},
+      "output_type": "execute_result"
+     },
+     {
+      "data": {
+-      "image/png": "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",
++      "image/png": "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",
+       "text/plain": [
+        "<Figure size 640x480 with 1 Axes>"
+       ]
+@@ -118,6 +118,7 @@
+     "np_cm = np.zeros((size, size), dtype=np.float32)\n",
+     "np_cm[0:spot_length_cells , 0:size:spot_width_cells]= 1.0\n",
+     "np_cm[4 * spot_length_cells, 4 * spot_width_cells:6 * spot_width_cells] = 1.0\n",
++    "# np_cm = tp.rasterize_line_segment(0, 0, 100, 100, size, size, np_cm, 1.0)\n",
+     "np_cm = compute_costmap(np_cm, 0.1, 1.0, 2.)\n",
+     "cm = tp.Costmap2D(0., 0., cell_size, size, size, np_cm.ravel().data)\n",
+     "plt.imshow(cm.to_np())"
+@@ -143,7 +144,7 @@
+     {
+      "data": {
+       "text/plain": [
+-       "<matplotlib.image.AxesImage at 0x7fd99a9ebac0>"
++       "<matplotlib.image.AxesImage at 0x7efc402d01c0>"
+       ]
+      },
+      "execution_count": 6,
+diff --git a/planning/terminal_planner_libs/package.xml b/planning/terminal_planner_libs/package.xml
+index 82abe3350..5583c2b4a 100644
+--- a/planning/terminal_planner_libs/package.xml
++++ b/planning/terminal_planner_libs/package.xml
+@@ -1,22 +1,16 @@
+ <?xml version="1.0"?>
+ <package format="2">
+-  <name>terminal_planner_libs</name>
+-  <version>0.0.0</version>
+-  <description>Terminal Planner libraries</description>
+-
+-  <maintainer email="dizan@applied.co">Dizan Vasquez</maintainer>
+-
+-
+-  <license>TODO</license>
+-
+-
+-  <buildtool_depend>catkin</buildtool_depend>
+-  <depend>roscpp</depend>
+-  <depend>roslib</depend>
+-  <depend>adk_standards</depend>
+-
+-  <test_depend>rosunit</test_depend>
+-  <test_depend>gtest</test_depend>
+-
+-
++    <name>terminal_planner_libs</name>
++    <version>0.0.0</version>
++    <description>Terminal Planner libraries</description>
++    <maintainer email="dizan@applied.co">Dizan Vasquez</maintainer>
++    <license>TODO</license>
++    <buildtool_depend>catkin</buildtool_depend>
++    <depend>roscpp</depend>
++    <depend>roslib</depend>
++    <depend>adk_standards</depend>
++    <depend>planning_common</depend>
++    <depend>utils_math</depend>
++    <test_depend>rosunit</test_depend>
++    <test_depend>gtest</test_depend>
+ </package>
+diff --git a/planning/terminal_planner_libs/src/free_space_planner/distance.cpp b/planning/terminal_planner_libs/src/free_space_planner/distance.cpp
+index ca62c5bbd..ed5623043 100644
+--- a/planning/terminal_planner_libs/src/free_space_planner/distance.cpp
++++ b/planning/terminal_planner_libs/src/free_space_planner/distance.cpp
+@@ -31,4 +31,26 @@ double Distance(const Vector2d& point, const Vector2d& segment_start, const Vect
+   return sqrt(result);
+ }
+ 
++std::pair<Vector2d, double> ClosestPoint(const Vector2d& point, const Vector2d& segment_start,
++                                         const Vector2d& segment_end)
++{
++  const Vector2d w = point - segment_start;
++  const Vector2d direction = segment_end - segment_start;
++  double proj = w.dot(direction);
++  double wsq = w.dot(w);
++  double dist2 = wsq;
++  if (proj <= 0.0) {
++    return { segment_start, sqrt(dist2) };
++  } else {
++    double vsq = direction.dot(direction);
++    if (proj >= vsq) {
++      dist2 = wsq - 2.0 * proj + vsq;
++      return { segment_end, sqrt(dist2) };
++    } else {
++      dist2 = wsq - proj * proj / vsq;
++      return { segment_start + (proj / vsq) * direction, sqrt(dist2) };
++    }
++  }
++}
++
+ } // namespace planning
+diff --git a/planning/terminal_planner_libs/src/free_space_planner/free_space_planner.cpp b/planning/terminal_planner_libs/src/free_space_planner/free_space_planner.cpp
+index 766c7b696..7c327bec4 100644
+--- a/planning/terminal_planner_libs/src/free_space_planner/free_space_planner.cpp
++++ b/planning/terminal_planner_libs/src/free_space_planner/free_space_planner.cpp
+@@ -91,7 +91,6 @@ std::vector<std::vector<Pose2D>> FreeSpacePlanner::plan(const Pose2D& start, con
+     return {};
+   }
+   Maneuvers maneuvers = planManeuvers(start, goal);
+-
+   if (maneuvers.empty()) {
+     return {};
+   }
+diff --git a/planning/terminal_planner_libs/src/terminal_behavior_helpers.cpp b/planning/terminal_planner_libs/src/terminal_behavior_helpers.cpp
+new file mode 100644
+index 000000000..1a157d95d
+--- /dev/null
++++ b/planning/terminal_planner_libs/src/terminal_behavior_helpers.cpp
+@@ -0,0 +1,191 @@
++#include "terminal_behavior_helpers.h"
++
++#include "free_space_planner/angles.h"
++#include "free_space_planner/distance_transform.h"
++#include "free_space_planner/rasterization.h"
++#include "planning_common/utils/frame_transformation.h"
++#include "planning_common/utils/reference_line_utils.h"
++
++
++namespace planning {
++
++namespace {
++
++void calculateTraversalCostPerCell(std::vector<float>& distance_transform_costmap, const float min_cost,
++                                   const float max_cost, const float scale_cost)
++{
++  const auto transform_cost_to_go = [&min_cost, &max_cost, &scale_cost](float x) {
++    float cost_to_go = std::exp((-1.0 * x) / scale_cost) * max_cost;
++    return std::max(min_cost, cost_to_go);
++  };
++  std::transform(distance_transform_costmap.begin(), distance_transform_costmap.end(),
++                 distance_transform_costmap.begin(), transform_cost_to_go);
++}
++
++/**
++ * @brief Extend path by a given distance
++ *
++ * @param path [input/output] Path to extend
++ * @param theta Fixed angle to extend on
++ * @param distance Distance to extend
++ * @param delta_distance Delta distance
++ * @return void
++ */
++void extendPath(std::vector<Pose2D>& path, const double theta, const double distance, const double delta_distance)
++{
++  if (path.empty()) {
++    return;
++  }
++  Pose2D start = path.back();
++  const int num_steps = std::ceil(distance / delta_distance);
++  const double dx = delta_distance * std::cos(theta);
++  const double dy = delta_distance * std::sin(theta);
++  for (int i = 0; i < num_steps; ++i) {
++    path.emplace_back(Pose2D{ .x = start.x + i * dx, .y = start.y + i * dy, .theta = theta });
++  }
++}
++
++} // namespace
++
++std::optional<ReferenceLine> buildSplineReferenceLine(const std::vector<Pose2D>& path, double ego_theta)
++{
++  // Convert to Eigen matrix
++  Eigen::Matrix2Xd path_points(2, path.size());
++  for (std::size_t i = 0; i < path.size(); ++i) {
++    path_points(0, static_cast<int>(i)) = path[i].x;
++    path_points(1, static_cast<int>(i)) = path[i].y;
++  }
++
++  Eigen::Vector2d ego_heading_vec(std::cos(ego_theta), std::sin(ego_theta));
++
++  // Build the spline reference line, no lane id needed
++  return ReferenceLineUtils::buildSplineReferenceLine(path_points, ego_heading_vec, LaneID::PARKING_LANE, false);
++}
++
++std::vector<Pose2D> planFreeSpacePath(const FreeSpacePlannerParameters& free_space_planner_params,
++                                      const EgoFootprint& ego_footprint,
++                                      const TerminalPlannerParams& terminal_planner_params,
++                                      FreeSpacePlanner& free_space_planner, const TerminalMappery& terminal_map,
++                                      const Pose2D& start, const Pose2D& goal)
++{
++  // Initialize Free Space Planner Params
++  const int rows = free_space_planner_params.space_dim_size;
++  const int columns = free_space_planner_params.space_dim_size;
++  const float cell_size = free_space_planner_params.cell_size;
++
++  // Create the Costmap2D object
++  const double offset_x =
++      -1.0 * (ego_footprint.reference_to_rear + terminal_planner_params.costmap_longitudinal_margin);
++  const double offset_y = -1.0 * (free_space_planner_params.space_dim_size / 2.0) * free_space_planner_params.cell_size;
++
++  // Generate the Buffer to Rasterize Objects as part of the Cost Map Generation
++  const std::vector<float> buffer =
++      rasterizeCostMap(free_space_planner_params, terminal_planner_params, terminal_map, offset_x, offset_y);
++
++  Costmap2D costmap_2d(offset_x, offset_y, cell_size, rows, columns, buffer);
++
++  // Create the Free Space Planner Object
++  free_space_planner.SetCostmap(costmap_2d);
++
++  std::vector<std::vector<Pose2D>> free_space_plan = free_space_planner.plan(start, goal);
++
++  // Flatten path
++  std::vector<Pose2D> result_plan;
++  for (const auto& plan : free_space_plan) {
++    result_plan.insert(result_plan.end(), plan.begin(), plan.end());
++  }
++  if (result_plan.empty()) {
++    return {};
++  }
++
++  // Extend the path to ensure the vehicle reaches the parking spot with buffer
++  extendPath(result_plan, goal.theta, terminal_planner_params.free_space_path_extend_distance,
++             terminal_planner_params.free_space_path_extend_delta_distance);
++
++  return result_plan;
++}
++
++std::vector<float> rasterizeCostMap(const FreeSpacePlannerParameters& free_space_planner_params,
++                                    const TerminalPlannerParams& terminal_planner_params,
++                                    const TerminalMappery& terminal_map, const double offset_x, const double offset_y)
++{
++  std::vector<float> buffer;
++
++  // We rasterize all objects in the scene within a particular search radius
++  const int rows = free_space_planner_params.space_dim_size;
++  const int columns = free_space_planner_params.space_dim_size;
++  const double cell_size = free_space_planner_params.cell_size;
++
++  std::vector<float> parking_spot_buffer(rows * columns, 0.0);
++  std::vector<float> static_obstacle_buffer(rows * columns, 0.0);
++
++  const double search_radius = free_space_planner_params.cell_size * free_space_planner_params.space_dim_size;
++
++  // Get all Parking Spot Boundaries and Static Obstacle Boundaries within the search radius
++  std::vector<std::vector<Eigen::Vector2d>> parking_spot_boundaries =
++      terminal_map.getTerminalParkingBoundariesWithinDistance(search_radius);
++  std::vector<std::vector<Eigen::Vector2d>> static_obstacle_boundaries =
++      terminal_map.getStaticObstaclesBoundariesWithinDistance(search_radius);
++
++  auto transform_to_costmap_space = [cell_size, offset_x, offset_y](std::vector<Eigen::Vector2d>& boundary) {
++    std::transform(boundary.begin(), boundary.end(), boundary.begin(),
++                   [cell_size, offset_x, offset_y](Eigen::Vector2d& point) {
++                     return Eigen::Vector2d((point[0] - offset_x) / cell_size, (point[1] - offset_y) / cell_size);
++                   });
++    return boundary;
++  };
++
++  // Transform the boundaries to the costmap space
++  std::transform(parking_spot_boundaries.begin(), parking_spot_boundaries.end(), parking_spot_boundaries.begin(),
++                 transform_to_costmap_space);
++  std::transform(static_obstacle_boundaries.begin(), static_obstacle_boundaries.end(),
++                 static_obstacle_boundaries.begin(), transform_to_costmap_space);
++
++  constexpr float buffer_value = 1.0f;
++
++  // Rasterize the Parking Spot Boundaries
++  for (const std::vector<Eigen::Vector2d>& parking_spot_boundary : parking_spot_boundaries) {
++    rasterizeLineSegments(parking_spot_boundary, rows, columns, parking_spot_buffer, buffer_value);
++  }
++
++  // Rasterize the Static Obstacle Boundaries
++  for (const std::vector<Eigen::Vector2d>& static_obstacle_boundary : static_obstacle_boundaries) {
++    rasterizeLineSegments(static_obstacle_boundary, rows, columns, static_obstacle_buffer, buffer_value);
++  }
++
++  // Run Distance Transform on the Buffer
++  std::vector<float> dist_transform_parking_spot_buf = DistanceTransform(rows, columns, parking_spot_buffer);
++  calculateTraversalCostPerCell(dist_transform_parking_spot_buf, terminal_planner_params.transform_min_cost,
++                                terminal_planner_params.transform_max_cost_parking_spot,
++                                terminal_planner_params.transform_scale_cost);
++
++  std::vector<float> dist_transform_static_obstacle_buf = DistanceTransform(rows, columns, static_obstacle_buffer);
++  calculateTraversalCostPerCell(dist_transform_static_obstacle_buf, terminal_planner_params.transform_min_cost,
++                                terminal_planner_params.transform_max_cost_static_obstacle,
++                                terminal_planner_params.transform_scale_cost);
++
++  // Buffer is the max of the two distance transform costmaps, use std::transform
++  std::transform(dist_transform_parking_spot_buf.begin(), dist_transform_parking_spot_buf.end(),
++                 dist_transform_static_obstacle_buf.begin(), std::back_inserter(buffer),
++                 [](float a, float b) { return std::max(a, b); });
++
++  return buffer;
++}
++
++Eigen::Vector3d convertGcsLocationToUtm(const GCSLocation& gcs_location)
++{
++  double utm_x, utm_y;
++  map_utils::UtmZone zone = map_utils::getUtmZone(gcs_location.latitude_deg, gcs_location.longitude_deg);
++  map_utils::convertGpsToUtm(gcs_location.latitude_deg, gcs_location.longitude_deg, zone, &utm_x, &utm_y);
++  double utm_theta =
++      map_utils::getUtmTheta(zone, gcs_location.heading, gcs_location.latitude_deg, gcs_location.longitude_deg);
++  return Eigen::Vector3d(utm_x, utm_y, utm_theta);
++}
++
++Pose2D transformPoseCoordinateFrame(const Pose2D& pose, const double dx, const double dy, const double d_theta)
++{
++  const Eigen::Vector3d result = transformCoordinateFrame(Eigen::Vector3d(pose.x, pose.y, pose.theta), dx, dy, d_theta);
++  return Pose2D{ result[0], result[1], result[2] };
++}
++
++} // namespace planning
+diff --git a/planning/terminal_planner_libs/src/terminal_planner_py.cpp b/planning/terminal_planner_libs/src/terminal_planner_py.cpp
+index b7a20b9c9..d2ab1306e 100644
+--- a/planning/terminal_planner_libs/src/terminal_planner_py.cpp
++++ b/planning/terminal_planner_libs/src/terminal_planner_py.cpp
+@@ -9,6 +9,7 @@
+ 
+ #include "free_space_planner/distance_transform.h"
+ #include "free_space_planner/free_space_planner.h"
++#include "free_space_planner/rasterization.h"
+ #include "piano_mover/c_space_costmap.h"
+ #include "piano_mover/costmap2d.h"
+ #include "piano_mover/discretization_data.h"
+@@ -89,7 +90,9 @@ PYBIND11_MODULE(terminal_planner_py, m)
+ 
+   py::class_<Pose2D>(m, "Pose2D")
+       .def(py::init<>())
+-      .def(py::init([](double x, double y, double theta) { return Pose2D{ x, y, theta }; }))
++      .def(py::init([](double x, double y, double theta) {
++        return Pose2D{ x, y, theta };
++      }))
+       .def_readwrite("x", &Pose2D::x)
+       .def_readwrite("y", &Pose2D::y)
+       .def_readwrite("theta", &Pose2D::theta);
+@@ -116,5 +119,23 @@ PYBIND11_MODULE(terminal_planner_py, m)
+           return py::array({ rows, columns }, result->data(), capsule);
+         });
+ 
++  m.def("rasterize_line_segment",
++        [](uint32_t x0, uint32_t y0, uint32_t x1, uint32_t y1, uint32_t rows, uint32_t columns,
++           py::array_t<double, py::array::c_style | py::array::forcecast> array, float fill_value) {
++          auto a = array.unchecked<2>();
++          std::vector<float>* result = new std::vector<float>(rows * columns);
++          uint32_t p = 0;
++          for (uint32_t r = 0; r < rows; ++r) {
++            for (uint32_t c = 0; c < columns; ++c) {
++              (*result)[p++] = a(r, c);
++            }
++          }
++          Eigen::Vector2d start(x0, y0);
++          Eigen::Vector2d end(x1, y1);
++          rasterizeLineSegment<float>(start, end, rows, columns, *result, fill_value);
++          auto capsule = py::capsule(result, [](void* v) { delete reinterpret_cast<std::vector<int>*>(v); });
++          return py::array({ rows, columns }, result->data(), capsule);
++        });
++
+   m.attr("TRUCK_301") = TRUCK_301;
+ }
+diff --git a/planning/terminal_planner_libs/test/BUILD b/planning/terminal_planner_libs/test/BUILD
+index 93aa1383d..934298e25 100644
+--- a/planning/terminal_planner_libs/test/BUILD
++++ b/planning/terminal_planner_libs/test/BUILD
+@@ -58,6 +58,17 @@ cc_test(
+     ],
+ )
+ 
++cc_test(
++    name = "rasterization_test",
++    srcs = ["rasterization_test.cpp"],
++    linkstatic = True,
++    deps = [
++        "//common/adk_standards",
++        "//planning/terminal_planner_libs",
++        "@com_google_googletest//:gtest",
++    ],
++)
++
+ cc_test(
+     name = "state_machine_test",
+     srcs = ["state_machine_test.cpp"],
+@@ -68,3 +79,13 @@ cc_test(
+         "@com_google_googletest//:gtest",
+     ],
+ )
++
++cc_test(
++    name = "terminal_behavior_helpers_test",
++    srcs = ["terminal_behavior_helpers_test.cpp"],
++    linkstatic = True,
++    deps = [
++        "//planning/terminal_planner_libs",
++        "@com_google_googletest//:gtest",
++    ],
++)
+diff --git a/planning/terminal_planner_libs/test/CMakeLists.txt b/planning/terminal_planner_libs/test/CMakeLists.txt
+index eb125a664..cf0bc3fb3 100644
+--- a/planning/terminal_planner_libs/test/CMakeLists.txt
++++ b/planning/terminal_planner_libs/test/CMakeLists.txt
+@@ -18,4 +18,10 @@ target_link_libraries(geometric_vector_test terminal_planner_libs ${catkin_LIBRA
+ catkin_add_gtest(maneuver_test maneuver_test.cpp)
+ target_link_libraries(maneuver_test terminal_planner_libs ${catkin_LIBRARIES} ${rosunit_LIBRARIES})
+ 
++catkin_add_gtest(rasterization_test rasterization_test.cpp)
++target_link_libraries(rasterization_test terminal_planner_libs ${catkin_LIBRARIES} ${rosunit_LIBRARIES})
++
+ catkin_add_gtest(state_machine_test state_machine_test.cpp)
++
++catkin_add_gtest(terminal_behavior_helpers_test terminal_behavior_helpers_test.cpp)
++target_link_libraries(terminal_behavior_helpers_test terminal_planner_libs ${catkin_LIBRARIES} ${rosunit_LIBRARIES})
+diff --git a/planning/terminal_planner_libs/test/rasterization_test.cpp b/planning/terminal_planner_libs/test/rasterization_test.cpp
+new file mode 100644
+index 000000000..bf7d06bbe
+--- /dev/null
++++ b/planning/terminal_planner_libs/test/rasterization_test.cpp
+@@ -0,0 +1,196 @@
++#include "free_space_planner/rasterization.h"
++
++#include <math.h>
++
++#include <iostream>
++#include <vector>
++
++#include "gtest/gtest.h"
++
++namespace planning {
++namespace {
++
++TEST(rasterizeLineSegment, RasterizeHorizontalLineSegment)
++{
++  Eigen::Vector2d start(0, 0);
++  Eigen::Vector2d end(5, 0);
++  int rows = 10;
++  int columns = 10;
++  std::vector<int> buffer(rows * columns, 0);
++  int fill_value = 1;
++  planning::rasterizeLineSegment(start, end, rows, columns, buffer, fill_value);
++  for (int i = start[0]; i <= end[0]; i++) {
++    int idx = start[1] * columns + i;
++    EXPECT_EQ(buffer[idx], fill_value);
++  }
++}
++
++TEST(rasterizeLineSegment, RasterizeHorizontalLineSegmentFlipped)
++{
++  Eigen::Vector2d start(5, 0);
++  Eigen::Vector2d end(0, 0);
++  int rows = 10;
++  int columns = 10;
++  std::vector<int> buffer(rows * columns, 0);
++  int fill_value = 1;
++  planning::rasterizeLineSegment(start, end, rows, columns, buffer, fill_value);
++  for (int i = start[0]; i <= end[0]; i++) {
++    int idx = start[1] * columns + i;
++    EXPECT_EQ(buffer[idx], fill_value);
++  }
++}
++
++TEST(rasterizeLineSegment, RasterizeVerticalLineSegment)
++{
++  Eigen::Vector2d start(0, 0);
++  Eigen::Vector2d end(0, 5);
++  int rows = 10;
++  int columns = 10;
++  std::vector<int> buffer(rows * columns, 0);
++  int fill_value = 1;
++  planning::rasterizeLineSegment(start, end, rows, columns, buffer, fill_value);
++  for (int i = start[1]; i <= end[1]; i++) {
++    int idx = i * columns + start[0];
++    EXPECT_EQ(buffer[idx], fill_value);
++  }
++}
++
++TEST(rasterizeLineSegment, RasterizeVerticalLineSegmentFlipped)
++{
++  Eigen::Vector2d start(0, 5);
++  Eigen::Vector2d end(0, 0);
++  int rows = 10;
++  int columns = 10;
++  std::vector<int> buffer(rows * columns, 0);
++  int fill_value = 1;
++  planning::rasterizeLineSegment(start, end, rows, columns, buffer, fill_value);
++  for (int i = start[1]; i <= end[1]; i++) {
++    int idx = i * columns + start[0];
++    EXPECT_EQ(buffer[idx], fill_value);
++  }
++}
++
++TEST(rasterizeLineSegment, RasterizeDiagonalLineSegment)
++{
++  Eigen::Vector2d start(0, 0);
++  Eigen::Vector2d end(5, 5);
++  int rows = 10;
++  int columns = 10;
++  std::vector<int> buffer(rows * columns, 0);
++  int fill_value = 1;
++  planning::rasterizeLineSegment(start, end, rows, columns, buffer, fill_value);
++  for (int i = 0; i <= 5; i++) {
++    int idx = i * columns + i;
++    EXPECT_EQ(buffer[idx], fill_value);
++  }
++}
++
++TEST(rasterizeLineSegment, RasterizeOutOfRange)
++{
++  Eigen::Vector2d start(-5, -5);
++  Eigen::Vector2d end(-1, -1);
++  int rows = 10;
++  int columns = 10;
++  std::vector<int> buffer(rows * columns, 0);
++  int fill_value = 1;
++  planning::rasterizeLineSegment(start, end, rows, columns, buffer, fill_value);
++  for (int i = 0; i < rows * columns; i++) {
++    EXPECT_EQ(buffer[i], 0);
++  }
++}
++
++TEST(rasterizeLineSegment, RasterizePartiallyOutOfRange)
++{
++  Eigen::Vector2d start(-5, -5);
++  Eigen::Vector2d end(5, 5);
++  int rows = 10;
++  int columns = 10;
++  std::vector<int> buffer(rows * columns, 0);
++  int fill_value = 1;
++  planning::rasterizeLineSegment(start, end, rows, columns, buffer, fill_value);
++  for (int i = 0; i <= 5; i++) {
++    int idx = i * columns + i;
++    EXPECT_EQ(buffer[idx], fill_value);
++  }
++}
++
++TEST(rasterizeLineSegment, RasterizeVerticalLineSegmentPartiallyOutOfRange)
++{
++  Eigen::Vector2d start(5, -5);
++  Eigen::Vector2d end(5, 5);
++  int rows = 10;
++  int columns = 10;
++  std::vector<int> buffer(rows * columns, 0);
++  int fill_value = 1;
++  planning::rasterizeLineSegment(start, end, rows, columns, buffer, fill_value);
++
++  for (int i = 0; i < 10; i++) {
++    for (int j = 0; j < 5; j++) {
++      int idx = i * columns + j;
++      if (i <= 5 && j == 5) {
++        EXPECT_EQ(buffer[idx], fill_value);
++      } else {
++        EXPECT_EQ(buffer[idx], 0);
++      }
++    }
++  }
++}
++
++TEST(rasterizeLineSegment, RasterizeDiagonalLineSegmentPartiallyOutOfRange)
++{
++  Eigen::Vector2d start(-5, -5);
++  Eigen::Vector2d end(15, 15);
++  int rows = 10;
++  int columns = 10;
++  std::vector<int> buffer(rows * columns, 0);
++  int fill_value = 1;
++  planning::rasterizeLineSegment(start, end, rows, columns, buffer, fill_value);
++
++  for (int i = 0; i < 10; i++) {
++    for (int j = 0; j < 10; j++) {
++      int idx = i * columns + j;
++      if (i == j) {
++        EXPECT_EQ(buffer[idx], fill_value);
++      } else {
++        EXPECT_EQ(buffer[idx], 0);
++      }
++    }
++  }
++}
++
++TEST(rasterizeLineSegments, RasterizeMultipleLineSegments)
++{
++  int rows = 10;
++  int columns = 10;
++  std::vector<int> buffer(rows * columns, 0);
++  int fill_value = 1;
++  std::vector<Eigen::Vector2d> line_segments = { Eigen::Vector2d(1, 1), Eigen::Vector2d(1, 4), Eigen::Vector2d(4, 4),
++                                                 Eigen::Vector2d(4, 1) };
++
++  planning::rasterizeLineSegments(line_segments, rows, columns, buffer, fill_value);
++  for (int i = 1; i <= 4; i++) {
++    int idx = 1 * columns + i;
++    EXPECT_EQ(buffer[idx], fill_value);
++  }
++  for (int i = 1; i <= 4; i++) {
++    int idx = i * columns + 4;
++    EXPECT_EQ(buffer[idx], fill_value);
++  }
++  for (int i = 1; i <= 4; i++) {
++    int idx = 4 * columns + i;
++    EXPECT_EQ(buffer[idx], fill_value);
++  }
++  for (int i = 1; i <= 4; i++) {
++    int idx = i * columns + 1;
++    EXPECT_EQ(buffer[idx], fill_value);
++  }
++}
++
++} // namespace
++} // namespace planning
++
++int main(int argc, char** argv)
++{
++  testing::InitGoogleTest(&argc, argv);
++  return RUN_ALL_TESTS();
++}
+diff --git a/planning/terminal_planner_libs/test/state_machine_test.cpp b/planning/terminal_planner_libs/test/state_machine_test.cpp
+index 148d6afae..4223fc4f3 100644
+--- a/planning/terminal_planner_libs/test/state_machine_test.cpp
++++ b/planning/terminal_planner_libs/test/state_machine_test.cpp
+@@ -20,8 +20,8 @@ namespace {
+ class FirstCounterState : public FSMState
+ {
+  public:
+-  FirstCounterState() : FSMState(/*id=*/0, /*name=*/"FirstCounter") {};
+-  void OnEnter() override {};
++  FirstCounterState() : FSMState(/*id=*/0, /*name=*/"FirstCounter"){};
++  void OnEnter() override{};
+   int Update() override;
+   void OnExit() override;
+ 
+@@ -32,9 +32,9 @@ class FirstCounterState : public FSMState
+ class SecondCounterState : public FSMState
+ {
+  public:
+-  SecondCounterState() : FSMState(/*id=*/1, /*name=*/"SecondCounter") {};
++  SecondCounterState() : FSMState(/*id=*/1, /*name=*/"SecondCounter"){};
+ 
+-  void OnEnter() override {};
++  void OnEnter() override{};
+   int Update() override;
+   void OnExit() override;
+ 
+diff --git a/planning/terminal_planner_libs/test/terminal_behavior_helpers_test.cpp b/planning/terminal_planner_libs/test/terminal_behavior_helpers_test.cpp
+new file mode 100644
+index 000000000..a631cf1ed
+--- /dev/null
++++ b/planning/terminal_planner_libs/test/terminal_behavior_helpers_test.cpp
+@@ -0,0 +1,58 @@
++#include "terminal_behavior_helpers.h"
++
++#include <gtest/gtest.h>
++
++namespace planning {
++namespace {
++
++constexpr double RESOLUTION = 0.3;
++
++TEST(TerminalBehaviorHelpers, buildSplineReferenceLineVertical)
++{
++  Pose2D p1{ 0.0, 0.0, 0.0 };
++  Pose2D p2{ 1.0, 0.0, 0.0 };
++  Pose2D p3{ 2.0, 0.0, 0.0 };
++
++  std::vector<Pose2D> path{ p1, p2, p3 };
++  std::optional<ReferenceLine> ref_line = buildSplineReferenceLine(path, 0);
++  ASSERT_TRUE(ref_line.has_value());
++
++  size_t expected_num_points = static_cast<size_t>(2.0 / RESOLUTION) + 1;
++  ASSERT_EQ(ref_line->getPoints().size(), expected_num_points);
++
++  for (const auto& point : ref_line->getPoints()) {
++    ASSERT_NEAR(point.tangent[0], 1.0, 1e-6);
++    ASSERT_NEAR(point.tangent[1], 0.0, 1e-6);
++  }
++}
++
++TEST(TerminalBehaviorHelpers, buildSplineReferenceLineDiagonal)
++{
++  Pose2D p1{ 1.0, 1.0, 0.0 };
++  Pose2D p2{ 2.0, 2.0, 0.0 };
++  Pose2D p3{ 3.0, 3.0, 0.0 };
++  Pose2D p4{ 4.0, 4.0, 0.0 };
++  Pose2D p5{ 5.0, 5.0, 0.0 };
++
++  std::vector<Pose2D> path{ p1, p2, p3, p4, p5 };
++  std::optional<ReferenceLine> ref_line = buildSplineReferenceLine(path, M_PI / 4.0);
++  ASSERT_TRUE(ref_line.has_value());
++
++  size_t expected_num_points = static_cast<size_t>(sqrt(2 * 4.0 * 4.0) / RESOLUTION) + 1;
++  ASSERT_EQ(ref_line->getPoints().size(), expected_num_points);
++
++  for (const auto& point : ref_line->getPoints()) {
++    ASSERT_NEAR(point.tangent[0], 1.0 / std::sqrt(2.0), 1e-6);
++    ASSERT_NEAR(point.tangent[1], 1.0 / std::sqrt(2.0), 1e-6);
++  }
++}
++
++} // namespace
++} // namespace planning
++
++
++int main(int argc, char** argv)
++{
++  testing::InitGoogleTest(&argc, argv);
++  return RUN_ALL_TESTS();
++}

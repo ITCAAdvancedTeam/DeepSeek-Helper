@@ -1,0 +1,1365 @@
+diff --git a/planning/behavior_planner/include/behavior_planner/action_target_helpers.h b/planning/behavior_planner/include/behavior_planner/action_target_helpers.h
+index 8c7577791..8606c5093 100644
+--- a/planning/behavior_planner/include/behavior_planner/action_target_helpers.h
++++ b/planning/behavior_planner/include/behavior_planner/action_target_helpers.h
+@@ -26,7 +26,7 @@ TimeRange fullPlanningHorizon(const PlannerParameters& params, const double star
+ /**
+  * @brief This function sets up an action target with all needed fields for generating trajectories
+  * to a follow target
+- * @param behavior_origin                        The behavior that generaged the action target
++ * @param behavior_origin                        The behavior that generated the action target
+  * @param front_objects                          Front objects to stay behind
+  * @param speed_limit                            Speed limit for generation
+  * @param origin_lane_id                         Origin lane id
+@@ -42,9 +42,24 @@ ActionTarget buildFollowLaneActionTarget(
+     const PlannerParameters& params, const std::unordered_map<ObjectID, AugmentedFrenetTrajectory>& refined_predictions,
+     const ReferenceLines& reference_lines, nominal_tg::PathIntegralNominal& path_integral_nominal_generator);
+ 
++/**
++ * @brief This function sets up an action target with all needed fields for terminal parking
++ * @param behavior_origin                        The behavior that generated the action target
++ * @param speed_limit                            Speed limit for generation
++ * @param scene                                  The scene
++ * @param params                                 The general planner parameters
++ * @param reference_line                         The terminal parking reference line
++ * @param path_integral_nominal_generator        The path integral nominal generator
++ * @return An action target
++ */
++ActionTarget buildTerminalParkingActionTarget(const BehaviorType& behavior_origin, const SpeedLimitProfile& speed_limit,
++                                              const PredictedScene& scene, const PlannerParameters& params,
++                                              const ReferenceLine& reference_line,
++                                              nominal_tg::PathIntegralNominal& path_integral_nominal_generator);
++
+ /**
+  * @brief This function sets up an action target with all needed fields for a teleop action target
+- * @param behavior_origin                        The behavior that generaged the action target
++ * @param behavior_origin                        The behavior that generated the action target
+  * @param action_type                            The action type for the action target
+  * @param nominal_trajectory                     The nominal trajectory to generate around
+  * @param speed_limit                            Speed limit for generation
+@@ -67,7 +82,7 @@ ActionTarget buildTeleopActionTarget(const BehaviorType& behavior_origin, const
+ 
+ /**
+  * @brief This function sets up an action target with all needed fields for a track gap action
+- * @param behavior_origin                       The behavior that generaged the action target
++ * @param behavior_origin                       The behavior that generated the action target
+  * @param nominal_trajectory                    The nominal longitudinal trajectory to follow
+  * @param nominal_lateral_trajectory            The nominal lateral trajectory to follow
+  * @param front objects                         The set of front objects and their time ranges
+diff --git a/planning/behavior_planner/include/behavior_planner/behaviors/behavior_base.h b/planning/behavior_planner/include/behavior_planner/behaviors/behavior_base.h
+index 9911af638..4fe30f12a 100644
+--- a/planning/behavior_planner/include/behavior_planner/behaviors/behavior_base.h
++++ b/planning/behavior_planner/include/behavior_planner/behaviors/behavior_base.h
+@@ -27,6 +27,13 @@ class BehaviorBase
+    */
+   virtual BehaviorType type() const = 0;
+ 
++  /**
++   * @brief Sets the parameters for the behavior
++   *
++   * @param params
++   */
++  virtual void setParams(const PlannerParameters& params) = 0;
++
+   /**
+    * @brief Method to compute the behavior's ActionTarget. The derived class must implement this!
+    *
+diff --git a/planning/behavior_planner/include/behavior_planner/behaviors/mock_behavior_base.h b/planning/behavior_planner/include/behavior_planner/behaviors/mock_behavior_base.h
+new file mode 100644
+index 000000000..601948686
+--- /dev/null
++++ b/planning/behavior_planner/include/behavior_planner/behaviors/mock_behavior_base.h
+@@ -0,0 +1,22 @@
++#pragma once
++
++#include <gmock/gmock.h>
++
++#include "behavior_base.h"
++
++namespace planning {
++
++class MockBehaviorBase : public BehaviorBase
++{
++ public:
++  MOCK_METHOD(BehaviorType, type, (), (const));
++
++  MOCK_METHOD(void, setParams, (const PlannerParameters& params), ());
++
++  MOCK_METHOD(std::optional<ActionTarget>, generateAction,
++              (const std::shared_ptr<const PredictedScene>& scene, const SituationConstraints& situation_constraints,
++               BehaviorPlannerDebugInfo& debug_info),
++              ());
++};
++
++} // namespace planning
+diff --git a/planning/behavior_planner/include/behavior_planner/behaviors/terminal_follow_lane.h b/planning/behavior_planner/include/behavior_planner/behaviors/terminal_follow_lane.h
+index b65ea300b..2ca3b9101 100644
+--- a/planning/behavior_planner/include/behavior_planner/behaviors/terminal_follow_lane.h
++++ b/planning/behavior_planner/include/behavior_planner/behaviors/terminal_follow_lane.h
+@@ -2,7 +2,6 @@
+ 
+ #include "behavior_planner/behaviors/behavior_base.h"
+ #include "behavior_planner/nominal_tg/path_integral_nominal.h"
+-#include "behavior_planner/behaviors/merge/gap_selecting_merge_handler.h"
+ #include "planning_common/types/action_target.h"
+ #include "planning_common/types/constraint_map.h"
+ #include "planning_common/types/planning_parameters.h"
+@@ -27,7 +26,7 @@ class TerminalFollowLaneBehavior : public BehaviorBase
+   void setParams(const PlannerParameters& params);
+ 
+   /**
+-   * @brief Creates an action target for following a front object in terminal lane if it exists, otherwise go to
++   * @brief Creates an action target for following a front object in ego's current lane if it exists, otherwise go to
+    * speed limit. Overrides the base class method.
+    * @param scene predicted scene object
+    * @param situation_constraints situational constraints
+@@ -42,9 +41,6 @@ class TerminalFollowLaneBehavior : public BehaviorBase
+  private:
+   PlannerParameters params_;
+   nominal_tg::PathIntegralNominal path_integral_nominal_generator_;
+-  
+-  MergeLocation previous_merge_location_;
+-  GapSelectingMergeHandler gap_selecting_merge_handler_;
+ };
+ 
+ } // namespace planning
+diff --git a/planning/behavior_planner/include/behavior_planner/behaviors/terminal_park.h b/planning/behavior_planner/include/behavior_planner/behaviors/terminal_park.h
+deleted file mode 100644
+index 15b025963..000000000
+--- a/planning/behavior_planner/include/behavior_planner/behaviors/terminal_park.h
++++ /dev/null
+@@ -1,46 +0,0 @@
+-#pragma once
+-
+-#include "behavior_planner/behaviors/behavior_base.h"
+-#include "behavior_planner/nominal_tg/path_integral_nominal.h"
+-#include "planning_common/types/action_target.h"
+-#include "planning_common/types/constraint_map.h"
+-#include "planning_common/types/planning_parameters.h"
+-#include "planning_common/types/predicted_scene.h"
+-
+-namespace planning {
+-class TerminalParkBehavior : public BehaviorBase
+-{
+- public:
+-  TerminalParkBehavior() = default;
+-
+-  /**
+-   * @brief BehaviorType of the TerminalParkBehavior is FOLLOW_ROAD
+-   *
+-   * @return BehaviorType
+-   */
+-  BehaviorType type() const final
+-  {
+-    return BehaviorType::FOLLOW_ROAD;
+-  }
+-
+-  void setParams(const PlannerParameters& params);
+-
+-  /**
+-   * @brief Creates an action target for following a front object in ego's current free space path if it exists, otherwise go to
+-   * speed limit. Overrides the base class method.
+-   * @param scene predicted scene object
+-   * @param situation_constraints situational constraints
+-   * @return std::optional<ActionTarget>
+-   */
+-  std::optional<ActionTarget> generateAction(const std::shared_ptr<const PredictedScene>& scene,
+-                                             const SituationConstraints& situation_constraints,
+-                                             BehaviorPlannerDebugInfo& debug_info) final;
+-
+-  const PlannerParameters& getParameters() const;
+-
+- private:
+-  PlannerParameters params_;
+-  nominal_tg::PathIntegralNominal path_integral_nominal_generator_;
+-};
+-
+-} // namespace planning
+diff --git a/planning/behavior_planner/include/behavior_planner/behaviors/terminal_parking/terminal_parking_behavior.h b/planning/behavior_planner/include/behavior_planner/behaviors/terminal_parking/terminal_parking_behavior.h
+new file mode 100644
+index 000000000..e98506512
+--- /dev/null
++++ b/planning/behavior_planner/include/behavior_planner/behaviors/terminal_parking/terminal_parking_behavior.h
+@@ -0,0 +1,103 @@
++#pragma once
++
++#include <optional>
++#include <vector>
++
++#include "behavior_planner/behaviors/behavior_base.h"
++#include "behavior_planner/nominal_tg/path_integral_nominal.h"
++#include "free_space_planner/distance_transform.h"
++#include "free_space_planner/free_space_planner.h"
++#include "planning_common/types/action_target.h"
++#include "planning_common/types/planning_parameters.h"
++#include "planning_common/utils/scene_utils.h"
++#include "terminal_behavior_helpers.h"
++
++namespace planning {
++
++/**
++ * @brief Class to plan a path for terminal parking
++ */
++class TerminalParkingBehavior : public BehaviorBase
++{
++ public:
++  /**
++   * @brief Default constructor
++   */
++  TerminalParkingBehavior();
++
++  /**
++   * @brief BehaviorType of the TerminalParkingBehavior is FREE_SPACE
++   *
++   * @return BehaviorType
++   */
++  BehaviorType type() const final
++  {
++    return BehaviorType::FREE_SPACE;
++  }
++
++  /**
++   * @brief Set the parameters for the terminal parking behavior
++   *
++   * @param planner_params parameters for the planner
++   */
++  void setParams(const PlannerParameters& planner_params);
++
++  /**
++   * @brief Compute the terminal parking path
++   *
++   * @param situation_constraints situation constraints
++   * @param scene predicted scene
++   */
++  void computeTerminalParkingPath(const SituationConstraints& situation_constraints, const PredictedScene& scene);
++
++  /**
++   * @brief Check if the terminal parking path is ready
++   *
++   * @return True of parking path is computed, otherwise False
++   */
++  bool isTerminalParkingPathReady() const;
++
++  /**
++   * @brief Get the terminal parking path in global UTM coordinates
++   *
++   * @return std::optional<std::vector<Eigen::Vector2d>> the parking path in UTM coordinates
++   */
++  std::optional<std::vector<Eigen::Vector3d>> getTerminalParkingPathInUtm() const;
++
++  /**
++   * @brief Clear the terminal parking action
++   */
++  void Clear();
++
++  /**
++   * @brief Creates an action target for terminal parking. Overrides the base class method.
++   * @param scene predicted scene object
++   * @param situation_constraints situational constraints
++   * @return std::optional<ActionTarget>
++   */
++  std::optional<ActionTarget> generateAction(const std::shared_ptr<const PredictedScene>& scene,
++                                             const SituationConstraints& situation_constraints,
++                                             BehaviorPlannerDebugInfo& debug_info);
++
++ private:
++  std::optional<std::vector<Pose2D>> parking_path_;
++  std::optional<Eigen::Vector3d> parking_path_frame_origin_;
++
++  PlannerParameters planner_params_;
++  nominal_tg::PathIntegralNominal path_integral_nominal_generator_;
++  FreeSpacePlannerParameters free_space_planner_params_;
++  EgoFootprint ego_footprint_;
++  TerminalPlannerParams terminal_planner_params_;
++
++  std::optional<FreeSpacePlanner> free_space_planner_;
++
++  /**
++   * @brief Calculate the terminal parking goal pose in ego frame
++   *
++   * @param scene predicted scene
++   * @return std::optional<Pose2D> the goal pose, if available
++   */
++  std::optional<Pose2D> getParkingSpotPoseInEgoFrame(const PredictedScene& scene) const;
++};
++
++} // namespace planning
+diff --git a/planning/behavior_planner/include/behavior_planner/behaviors/terminal_parking/terminal_unparking_behavior.h b/planning/behavior_planner/include/behavior_planner/behaviors/terminal_parking/terminal_unparking_behavior.h
+new file mode 100644
+index 000000000..f39f7f8bb
+--- /dev/null
++++ b/planning/behavior_planner/include/behavior_planner/behaviors/terminal_parking/terminal_unparking_behavior.h
+@@ -0,0 +1,103 @@
++#pragma once
++
++#include <optional>
++#include <vector>
++
++#include "behavior_planner/behaviors/behavior_base.h"
++#include "behavior_planner/nominal_tg/path_integral_nominal.h"
++#include "free_space_planner/distance_transform.h"
++#include "free_space_planner/free_space_planner.h"
++#include "planning_common/types/action_target.h"
++#include "planning_common/types/planning_parameters.h"
++#include "planning_common/utils/scene_utils.h"
++#include "terminal_behavior_helpers.h"
++
++namespace planning {
++
++/**
++ * @brief Class to plan a path for terminal parking
++ */
++class TerminalUnparkingBehavior : public BehaviorBase
++{
++ public:
++  /**
++   * @brief Default constructor
++   */
++  TerminalUnparkingBehavior();
++
++  /**
++   * @brief BehaviorType of the TerminalUnparkingBehavior is FREE_SPACE
++   *
++   * @return BehaviorType
++   */
++  BehaviorType type() const final
++  {
++    return BehaviorType::FREE_SPACE;
++  }
++
++  /**
++   * @brief Set the parameters for the terminal parking behavior
++   *
++   * @param planner_params parameters for the planner
++   */
++  void setParams(const PlannerParameters& planner_params);
++
++  /**
++   * @brief Compute the terminal parking path
++   *
++   * @param situation_constraints situation constraints
++   * @param scene predicted scene
++   */
++  void computeTerminalUnparkingPath(const SituationConstraints& situation_constraints, const PredictedScene& scene);
++
++  /**
++   * @brief Check if the terminal unparking path is ready
++   *
++   * @return True of unparking path is computed, otherwise False
++   */
++  bool isTerminalUnparkingPathReady() const;
++
++  /**
++   * @brief Get the terminal unparking path in global UTM coordinates
++   *
++   * @return std::optional<std::vector<Eigen::Vector2d>> the unparking path in UTM coordinates
++   */
++  std::optional<std::vector<Eigen::Vector3d>> getTerminalUnparkingPathInUtm() const;
++
++  /**
++   * @brief Clear the terminal parking action
++   */
++  void Clear();
++
++  /**
++   * @brief Creates an action target for terminal parking. Overrides the base class method.
++   * @param scene predicted scene object
++   * @param situation_constraints situational constraints
++   * @return std::optional<ActionTarget>
++   */
++  std::optional<ActionTarget> generateAction(const std::shared_ptr<const PredictedScene>& scene,
++                                             const SituationConstraints& situation_constraints,
++                                             BehaviorPlannerDebugInfo& debug_info);
++
++ private:
++  std::optional<std::vector<Pose2D>> unparking_path_;
++  std::optional<Eigen::Vector3d> unparking_path_frame_origin_;
++
++  PlannerParameters planner_params_;
++  nominal_tg::PathIntegralNominal path_integral_nominal_generator_;
++  FreeSpacePlannerParameters free_space_planner_params_;
++  EgoFootprint ego_footprint_;
++  TerminalPlannerParams terminal_planner_params_;
++
++  std::optional<FreeSpacePlanner> free_space_planner_;
++
++  /**
++   * @brief Calculate the terminal parking goal pose in ego frame
++   *
++   * @param scene predicted scene
++   * @return std::optional<Pose2D> the goal pose, if available
++   */
++  std::optional<Pose2D> getUnparkHandoffPoseInEgoFrame(const PredictedScene& scene) const;
++};
++
++} // namespace planning
+diff --git a/planning/behavior_planner/include/behavior_planner/behaviors/terminal_unpark.h b/planning/behavior_planner/include/behavior_planner/behaviors/terminal_unpark.h
+deleted file mode 100644
+index a8fb85130..000000000
+--- a/planning/behavior_planner/include/behavior_planner/behaviors/terminal_unpark.h
++++ /dev/null
+@@ -1,46 +0,0 @@
+-#pragma once
+-
+-#include "behavior_planner/behaviors/behavior_base.h"
+-#include "behavior_planner/nominal_tg/path_integral_nominal.h"
+-#include "planning_common/types/action_target.h"
+-#include "planning_common/types/constraint_map.h"
+-#include "planning_common/types/planning_parameters.h"
+-#include "planning_common/types/predicted_scene.h"
+-
+-namespace planning {
+-class TerminalUnparkBehavior : public BehaviorBase
+-{
+- public:
+-  TerminalUnparkBehavior() = default;
+-
+-  /**
+-   * @brief BehaviorType of the TerminalUnparkBehavior is FOLLOW_ROAD
+-   *
+-   * @return BehaviorType
+-   */
+-  BehaviorType type() const final
+-  {
+-    return BehaviorType::FOLLOW_ROAD;
+-  }
+-
+-  void setParams(const PlannerParameters& params);
+-
+-  /**
+-   * @brief Creates an action target for following a front object in ego's current free space path if it exists, otherwise go to
+-   * speed limit. Overrides the base class method.
+-   * @param scene predicted scene object
+-   * @param situation_constraints situational constraints
+-   * @return std::optional<ActionTarget>
+-   */
+-  std::optional<ActionTarget> generateAction(const std::shared_ptr<const PredictedScene>& scene,
+-                                             const SituationConstraints& situation_constraints,
+-                                             BehaviorPlannerDebugInfo& debug_info) final;
+-
+-  const PlannerParameters& getParameters() const;
+-
+- private:
+-  PlannerParameters params_;
+-  nominal_tg::PathIntegralNominal path_integral_nominal_generator_;
+-};
+-
+-} // namespace planning
+diff --git a/planning/behavior_planner/include/behavior_planner/terminal_planner.h b/planning/behavior_planner/include/behavior_planner/terminal_planner.h
+index 69b71ab7b..68c4a9207 100644
+--- a/planning/behavior_planner/include/behavior_planner/terminal_planner.h
++++ b/planning/behavior_planner/include/behavior_planner/terminal_planner.h
+@@ -6,13 +6,16 @@
+ #include <planning_common/types/predicted_scene.h>
+ #include <ros/node_handle.h>
+ 
++#include <Eigen/Core>
+ #include <unordered_map>
+ 
++#include "behavior_planner/behaviors/lane_change/lane_change_behavior.h"
++#include "behavior_planner/behaviors/merge_behavior.h"
+ #include "behavior_planner/behaviors/terminal_follow_lane.h"
+-#include "behavior_planner/behaviors/terminal_park.h"
+-#include "behavior_planner/behaviors/terminal_unpark.h"
++#include "behavior_planner/behaviors/terminal_parking/terminal_parking_behavior.h"
++#include "behavior_planner/behaviors/terminal_parking/terminal_unparking_behavior.h"
+ #include "planning_common/types/operational_domain.h"
+-#include "planning_common/types/planning_debug_types.h"
++#include "truck_adapter/driver_alerts.h"
+ 
+ namespace planning {
+ 
+@@ -20,7 +23,15 @@ namespace planning {
+ class TerminalPlanner
+ {
+  public:
+-  TerminalPlanner() = default;
++  TerminalPlanner(ros::NodeHandle* nh, std::shared_ptr<DriverAlerts> driver_alerts,
++                  std::shared_ptr<TruckFunctions> truck_functions_interface);
++
++  /**
++   * This constructor is used for testing purposes only
++   */
++  TerminalPlanner(ros::NodeHandle* nh, std::shared_ptr<DriverAlerts> driver_alerts,
++                  std::shared_ptr<TruckFunctions> truck_functions_interface, BehaviorBase& follow_lane_behavior,
++                  BehaviorBase& parking_behavior, BehaviorBase& unparking_behavior);
+ 
+   /**
+    * @brief Sets all parameters needed
+@@ -44,17 +55,34 @@ class TerminalPlanner
+   std::unordered_map<BehaviorType, ActionTarget> planActionTargets(const SituationConstraints& situation_constraints,
+                                                                    const std::shared_ptr<const PredictedScene>& scene,
+                                                                    const OperationalDomain& operational_domain,
+-                                                                   BehaviorPlannerDebugInfo* debug_info);
++                                                                   BehaviorPlannerDebugInfo* debug_info,
++                                                                   bool& free_space_plan_ready);
++
++  /**
++   * @brief Get the free space path, if it exists
++   *
++   * @return std::optional<std::vector<Eigen::Vector2d>> The free space path
++   */
++  std::optional<std::vector<Eigen::Vector3d>> getFreeSpacePath() const;
+ 
+ 
+  private:
+   // Parameters
+   PlannerParameters planner_params_;
+ 
+-  // Action handlers that produce the different actions we can perform
+-  TerminalFollowLaneBehavior terminal_follow_lane_behavior_;
+-  TerminalParkBehavior terminal_park_behavior_;
+-  TerminalUnparkBehavior terminal_unpark_behavior_;
++  // Base behaviors that allows for unit testing
++  BehaviorBase& follow_lane_behavior_;
++  BehaviorBase& parking_behavior_;
++  BehaviorBase& unparking_behavior_;
++
++  // Action handlers for terminal planning
++  TerminalFollowLaneBehavior default_follow_lane_behavior_;
++  TerminalParkingBehavior default_parking_behavior_;
++  TerminalUnparkingBehavior default_unparking_behavior_;
++
++  std::future<void> compute_parking_path_future_;
++  bool parking_path_compute_in_progress_ = false;
++  bool unparking_path_ready_ = false;
+ };
+ 
+ } // namespace planning
+diff --git a/planning/behavior_planner/include/behavior_planner/utils/behavior_planner_exception.h b/planning/behavior_planner/include/behavior_planner/utils/behavior_planner_exception.h
+index 184cf984a..259a5f91e 100644
+--- a/planning/behavior_planner/include/behavior_planner/utils/behavior_planner_exception.h
++++ b/planning/behavior_planner/include/behavior_planner/utils/behavior_planner_exception.h
+@@ -13,11 +13,4 @@ class BehaviorPlannerException : public std::runtime_error
+     : std::runtime_error(("BehaviorPlannerException::" + what).c_str()){};
+ };
+ 
+-class TerminalPlannerException : public std::runtime_error
+-{
+- public:
+-  explicit TerminalPlannerException(const std::string& what)
+-    : std::runtime_error(("TerminalPlannerException::" + what).c_str()){};
+-};
+-
+ } // namespace planning
+diff --git a/planning/behavior_planner/src/action_target_helpers.cpp b/planning/behavior_planner/src/action_target_helpers.cpp
+index ed251cf93..b79ea8243 100644
+--- a/planning/behavior_planner/src/action_target_helpers.cpp
++++ b/planning/behavior_planner/src/action_target_helpers.cpp
+@@ -369,6 +369,25 @@ CombinedLaneBoundaries extractBoundaries(LaneID source_lane, LaneID target_lane,
+            .right = internal::concatenatePartialLaneBoundaries(boundary_pnts.right, BOUNDARY_PNT_MIN_SEP_DIST_M) };
+ }
+ 
++CombinedLaneBoundaries createBoundariesForFreeSpaceReferenceLine(const ReferenceLine& reference_line, double lane_width)
++{
++  const auto& points = reference_line.getPoints();
++  const size_t n_points = points.size();
++  Eigen::Matrix2Xd left_boundary(2, n_points);
++  Eigen::Matrix2Xd right_boundary(2, n_points);
++
++  for (size_t i = 0; i < n_points; ++i) {
++    const ReferencePoint& point = points.at(i);
++    const Eigen::Vector2d normal = point.normal;
++    left_boundary(0, i) = point.x - lane_width * normal.x();
++    left_boundary(1, i) = point.y - lane_width * normal.y();
++    right_boundary(0, i) = point.x + lane_width * normal.x();
++    right_boundary(1, i) = point.y + lane_width * normal.y();
++  }
++
++  return { .left = left_boundary, .right = right_boundary };
++}
++
+ std::optional<lane_map::LaneRef> egoLaneRef(const PredictedScene& scene)
+ {
+   const lane_map::LaneRef* lr_ptr = scene.getLaneGraph().getEgoLaneRef();
+@@ -442,6 +461,46 @@ ActionTarget buildFollowLaneActionTarget(
+                       std::move(boundaries.right), std::nullopt);
+ }
+ 
++ActionTarget buildTerminalParkingActionTarget(const BehaviorType& behavior_origin, const SpeedLimitProfile& speed_limit,
++                                              const PredictedScene& scene, const PlannerParameters& params,
++                                              const ReferenceLine& reference_line,
++                                              nominal_tg::PathIntegralNominal& path_integral_nominal_generator)
++{
++  diagnostics_utils::SequentialExecution exec_timing;
++  exec_timing.trace();
++
++  const State& initial_state = scene.getEgoObject().getEgoLaneFrenet().s;
++
++  // No front or rear objects to consider
++  ObjectTrajectoryMixture front_object_trajectory = ObjectTrajectoryMixture({}, fullPlanningHorizon(params, 0.0));
++  ObjectTrajectoryMixture rear_object_trajectory = ObjectTrajectoryMixture({}, fullPlanningHorizon(params, 0.0));
++
++  // No object predictions
++  RefinedPredictions refined_predictions;
++  std::vector<PredictedObjectTG> predicted_objects_tg;
++
++  exec_timing.start("Terminal Planning : Compute parking trajectory.", CALLER_INFO());
++  Trajectory nominal_trajectory = path_integral_nominal_generator.computeNominalTrajectory(
++      initial_state, speed_limit.speed_limit, front_object_trajectory);
++  exec_timing.stop();
++
++  // Center-line lateral trajectory
++  Trajectory nominal_lateral_trajectory = simple_tg::generateTrajectoryConstantVelocity(
++      State::Zero(), /*duration=*/nominal_trajectory.getTotalDuration(), nominal_trajectory.getDt());
++
++  assert(nominal_trajectory.getTotalDuration() > 0.0);
++
++  // TODO: Load parking reference line boundary width from params
++  auto boundaries = createBoundariesForFreeSpaceReferenceLine(reference_line, 2.0);
++
++  return ActionTarget(behavior_origin, speed_limit, ActionTargetType::FOLLOW_LANE, LaneID::UNDEFINED, LaneID::UNDEFINED,
++                      std::move(nominal_trajectory), std::move(nominal_lateral_trajectory),
++                      std::move(front_object_trajectory), std::move(rear_object_trajectory),
++                      std::move(refined_predictions), std::move(predicted_objects_tg),
++                      SourceFrame(scene.getTimeStamp(), scene.getEgoOdom()), reference_line, std::move(boundaries.left),
++                      std::move(boundaries.right), std::nullopt);
++}
++
+ ActionTarget buildTeleopActionTarget(const BehaviorType& behavior_origin, const ActionTargetType& action_type,
+                                      const Trajectory& nominal_trajectory, const SpeedLimitProfile& speed_limit,
+                                      LaneID follow_lane_id, LaneID target_id, const SourceFrame& source_frame,
+diff --git a/planning/behavior_planner/src/behaviors/lane_change/graph_search_lc/gs_lane_change.cpp b/planning/behavior_planner/src/behaviors/lane_change/graph_search_lc/gs_lane_change.cpp
+index abc23425c..159cfa5ff 100644
+--- a/planning/behavior_planner/src/behaviors/lane_change/graph_search_lc/gs_lane_change.cpp
++++ b/planning/behavior_planner/src/behaviors/lane_change/graph_search_lc/gs_lane_change.cpp
+@@ -14,6 +14,18 @@
+ 
+ namespace planning {
+ 
++namespace {
++std::vector<lane_map::LaneRef> getCurrentLanesInOrder(const PredictedScene& scene, const lane_map::LaneGroupRef& lg_ref,
++                                                      const maps::LaneSubMap& map)
++{
++  if (!scene.isLeftHandDriveEnabled()) {
++    return lane_map_utils::getLaneRefsLeftToRight(lg_ref, map);
++  } else {
++    return lane_map_utils::getLaneRefsRightToLeft(lg_ref, map);
++  }
++}
++} // namespace
++
+ namespace gs = graph_search;
+ 
+ // graph search will run every 3 planner cycles.
+@@ -284,9 +296,9 @@ boost::optional<basic_types::RelativeDirection> getUrgentLaneChangeDirection(con
+ 
+   while (ego_lane_ref_it != ego_lane_refs.end()) {
+     const lane_map::LaneRef& lr = *ego_lane_ref_it;
+-    // get the lane refs of the lane group, ordered from left to right.
++    // get the lane refs of the lane group, ordered from Left to Right (Right to Left for Japan)
+     std::vector<lane_map::LaneRef> lanes =
+-        lane_map_utils::getLaneRefsInOrder(lr.getLaneGroupRef(), scene.getLaneGraph().getMap());
++        getCurrentLanesInOrder(scene, lr.getLaneGroupRef(), scene.getLaneGraph().getMap());
+     auto it = std::find(lanes.begin(), lanes.end(), lr);
+     assert(it != lanes.end());
+     int idx = it - lanes.begin();
+diff --git a/planning/behavior_planner/src/behaviors/terminal_follow_lane.cpp b/planning/behavior_planner/src/behaviors/terminal_follow_lane.cpp
+index 989dc9e73..834a1937c 100644
+--- a/planning/behavior_planner/src/behaviors/terminal_follow_lane.cpp
++++ b/planning/behavior_planner/src/behaviors/terminal_follow_lane.cpp
+@@ -19,20 +19,15 @@ const PlannerParameters& TerminalFollowLaneBehavior::getParameters() const
+   return params_;
+ }
+ 
+-std::optional<ActionTarget> TerminalFollowLaneBehavior::generateAction(const std::shared_ptr<const PredictedScene>& scene,
+-                                                                       const SituationConstraints& situation_constraints,
+-                                                                       BehaviorPlannerDebugInfo& /* debug_info */)
++std::optional<ActionTarget> TerminalFollowLaneBehavior::generateAction(
++    const std::shared_ptr<const PredictedScene>& scene, const SituationConstraints& situation_constraints,
++    BehaviorPlannerDebugInfo& /* debug_info */)
+ {
+   using action_utils::buildFollowLaneActionTarget;
+ 
+-  // // Do not handle front objects in free space
+-  // if (situation_constraints.current_area_type == AreaType::REST_AREA) {
+-  //   return std::nullopt;
+-  // }
+-
+   const LaneID ego_lane_ref_line_id = scene->getEgoObject().getLaneIDAssociation();
+   assert(scene->getReferenceLines().containsID(ego_lane_ref_line_id));
+-  const BehaviorType behavior_origin = BehaviorType::TERMINAL_FOLLOW_LANE;
++  const BehaviorType behavior_origin = BehaviorType::FOLLOW_ROAD;
+   const SpeedLimitProfile& speed_limit =
+       situation_constraints.speed_constraints_per_behavior.at(ego_lane_ref_line_id).constraints.at(behavior_origin);
+ 
+@@ -42,41 +37,9 @@ std::optional<ActionTarget> TerminalFollowLaneBehavior::generateAction(const std
+     front_objects.insert({ action_utils::fullPlanningHorizon(params_), { *front_object_id } });
+   }
+ 
+-  auto lane_following_action = buildFollowLaneActionTarget(
++  return buildFollowLaneActionTarget(
+       behavior_origin, front_objects, speed_limit, ego_lane_ref_line_id /* origin lane */, *scene, params_,
+       {} /* refined predictions */, scene->getReferenceLines(), path_integral_nominal_generator_);
+-  
+-  // integrate merge behavior if there is one
+-  if (scene->getMapEgoLane().is_merging) {
+-    const planner::MergeConfig& merge_config = params_.behavior.merge;
+-    const auto merge_location = calculateMergeLocation(*scene, merge_config.merge_critical_lane_width).value();
+-
+-    // If two merges are very close to each other we can start processing the next one before we
+-    // had a chance to reset the internal state. This resets the internal state if we start working
+-    // on a new merge junction.
+-    assert(merge_location.merge_junction_id);
+-    if (!previous_merge_location_.merge_junction_id ||
+-        previous_merge_location_.merge_junction_id != merge_location.merge_junction_id) {
+-      gap_selecting_merge_handler_.clear();
+-    }
+-
+-    previous_merge_location_ = merge_location;
+-
+-    // Compute ego distance to critical merge point.
+-    double critical_point_dist = scene->getLaneGraph().getPathDistanceToFrontMergePt(
+-        scene->getMapEgoLane(), 0, 0, params_.behavior.merge.merge_critical_lane_width);
+-   // Activate if distance to critical point is below threshold.
+-    if (critical_point_dist <= params_.behavior.merge.merge_min_react_dist) {
+-      return gap_selecting_merge_handler_.mergeAction(situation_constraints, *scene);
+-    } else { // Not active
+-      gap_selecting_merge_handler_.clear();
+-    }
+-  } else { // Not merging
+-    gap_selecting_merge_handler_.clear();
+-    previous_merge_location_.merge_junction_id = boost::none;
+-  }
+-
+-  return lane_following_action;
+ }
+ 
+ } // namespace planning
+diff --git a/planning/behavior_planner/src/behaviors/terminal_park.cpp b/planning/behavior_planner/src/behaviors/terminal_park.cpp
+deleted file mode 100644
+index b1193f493..000000000
+--- a/planning/behavior_planner/src/behaviors/terminal_park.cpp
++++ /dev/null
+@@ -1,47 +0,0 @@
+-#include "behavior_planner/behaviors/terminal_park.h"
+-
+-#include "behavior_planner/action_target_helpers.h"
+-#include "diagnostics_utils/instrumentation.h"
+-#include "planning_common/math/frenet_transformations.h"
+-#include "planning_common/utils/scene_utils.h"
+-#include "simple_trajectory_generation/simple_trajectory_generation.h"
+-
+-namespace planning {
+-
+-void TerminalParkBehavior::setParams(const PlannerParameters& params)
+-{
+-  params_ = params;
+-  path_integral_nominal_generator_.setParams(params);
+-}
+-
+-const PlannerParameters& TerminalParkBehavior::getParameters() const
+-{
+-  return params_;
+-}
+-
+-std::optional<ActionTarget> TerminalParkBehavior::generateAction(const std::shared_ptr<const PredictedScene>& scene,
+-                                                                 const SituationConstraints& situation_constraints,
+-                                                                 BehaviorPlannerDebugInfo& /* debug_info */)
+-{
+-  using action_utils::buildFollowLaneActionTarget;
+-
+-  // Set LaneID, BehaviorType and speed limit information
+-  const LaneID ego_lane_ref_line_id = LaneID::PARK_PATH;
+-  assert(scene->getReferenceLines().containsID(ego_lane_ref_line_id));
+-  const BehaviorType behavior_origin = BehaviorType::TERMINAL_PARK;
+-  const SpeedLimitProfile& speed_limit =
+-      situation_constraints.speed_constraints_per_behavior.at(ego_lane_ref_line_id).constraints.at(behavior_origin);
+-
+-  // Set front object
+-  const boost::optional<ObjectID> front_object_id = scene->getFrontObjectID();
+-  OverlappingObjectTrajectoryMixture front_objects;
+-  if (front_object_id) {
+-    front_objects.insert({ action_utils::fullPlanningHorizon(params_), { *front_object_id } });
+-  }
+-
+-  return buildFollowLaneActionTarget(
+-      behavior_origin, front_objects, speed_limit, ego_lane_ref_line_id /* origin lane */, *scene, params_,
+-      {} /* refined predictions */, scene->getReferenceLines(), path_integral_nominal_generator_);
+-}
+-
+-} // namespace planning
+diff --git a/planning/behavior_planner/src/behaviors/terminal_parking/terminal_parking_behavior.cpp b/planning/behavior_planner/src/behaviors/terminal_parking/terminal_parking_behavior.cpp
+new file mode 100644
+index 000000000..e3ece5a8f
+--- /dev/null
++++ b/planning/behavior_planner/src/behaviors/terminal_parking/terminal_parking_behavior.cpp
+@@ -0,0 +1,159 @@
++#include "behavior_planner/behaviors/terminal_parking/terminal_parking_behavior.h"
++
++#include <Eigen/Core>
++
++#include "behavior_planner/action_target_helpers.h"
++#include "free_space_planner/angles.h"
++#include "free_space_planner/rasterization.h"
++#include "planning_common/utils/frenet_utils.h"
++#include "terminal_behavior_helpers.h"
++
++namespace planning {
++
++TerminalParkingBehavior::TerminalParkingBehavior() : parking_path_(std::nullopt), free_space_planner_(std::nullopt)
++{
++}
++
++void TerminalParkingBehavior::setParams(const PlannerParameters& planner_params)
++{
++  planner_params_ = planner_params;
++  path_integral_nominal_generator_.setParams(planner_params);
++
++  free_space_planner_params_.turning_radius = planner_params_.free_space_planner.turning_radius;
++  free_space_planner_params_.transition_cost = planner_params_.free_space_planner.transition_cost;
++  free_space_planner_params_.iterations = planner_params_.free_space_planner.iterations;
++  free_space_planner_params_.search_radius = planner_params_.free_space_planner.search_radius;
++  free_space_planner_params_.cell_size = planner_params_.free_space_planner.cell_size;
++  free_space_planner_params_.space_dim_size = planner_params_.free_space_planner.space_dim_size;
++  free_space_planner_params_.angle_dim_size = planner_params_.free_space_planner.angle_dim_size;
++  free_space_planner_params_.weight1 = planner_params_.free_space_planner.weight1;
++  free_space_planner_params_.weight2 = planner_params_.free_space_planner.weight2;
++
++  ego_footprint_.reference_to_front = planner_params_.vehicle_params_.rear_axle_to_front_bumper;
++  ego_footprint_.reference_to_rear = planner_params_.vehicle_params_.rear_axle_to_rear_bumper;
++  ego_footprint_.reference_to_side = planner_params_.vehicle_params_.tractor_width / 2.0;
++
++  terminal_planner_params_.transform_min_cost = planner_params_.terminal_planner.transform_min_cost;
++  terminal_planner_params_.transform_max_cost_parking_spot =
++      planner_params_.terminal_planner.transform_max_cost_parking_spot;
++  terminal_planner_params_.transform_max_cost_static_obstacle =
++      planner_params_.terminal_planner.transform_max_cost_static_obstacle;
++  terminal_planner_params_.transform_scale_cost = planner_params_.terminal_planner.transform_scale_cost;
++  terminal_planner_params_.costmap_longitudinal_margin = planner_params_.terminal_planner.costmap_longitudinal_margin;
++  terminal_planner_params_.free_space_path_extend_distance =
++      planner_params_.terminal_planner.free_space_path_extend_distance;
++  terminal_planner_params_.free_space_path_extend_delta_distance =
++      planner_params_.terminal_planner.free_space_path_extend_delta_distance;
++
++  free_space_planner_ = FreeSpacePlanner(ego_footprint_, free_space_planner_params_);
++}
++
++std::optional<ActionTarget> TerminalParkingBehavior::generateAction(const std::shared_ptr<const PredictedScene>& scene,
++                                                                    const SituationConstraints& situation_constraints,
++                                                                    BehaviorPlannerDebugInfo& debug_info)
++{
++  if (!isTerminalParkingPathReady()) {
++    return std::nullopt;
++  }
++
++  // Get Ego pose difference in origin frame
++  const Eigen::Vector3d ego_utm = convertGcsLocationToUtm(scene->getGCSLocation());
++  const double dx_global = ego_utm[0] - parking_path_frame_origin_.value()[0];
++  const double dy_global = ego_utm[1] - parking_path_frame_origin_.value()[1];
++  const double origin_theta = parking_path_frame_origin_.value()[2];
++  const Pose2D d_pose = transformPoseCoordinateFrame(Pose2D{ dx_global, dy_global, ego_utm[2] }, 0, 0, origin_theta);
++
++  // Transform parking path to current ego frame
++  std::vector<Pose2D> ego_frame_parking_path(parking_path_.value().size());
++  std::transform(
++      parking_path_.value().begin(), parking_path_.value().end(), ego_frame_parking_path.begin(),
++      [d_pose](const Pose2D& pose) { return transformPoseCoordinateFrame(pose, d_pose.x, d_pose.y, d_pose.theta); });
++
++  // Build reference line from parking path
++  const std::optional<ReferenceLine> parking_reference_line = buildSplineReferenceLine(ego_frame_parking_path, 0.0);
++  if (!parking_reference_line.has_value()) {
++    std::cerr << "Failed to build reference line for terminal parking." << std::endl;
++    return std::nullopt;
++  }
++
++  const BehaviorType behavior_origin = type();
++  SpeedLimitProfile speed_limit;
++  speed_limit.setConstantSpeedLimit(planner_params_.speed_limiter.terminal_parking_speed_limit);
++
++  return action_utils::buildTerminalParkingActionTarget(behavior_origin, speed_limit, *scene, planner_params_,
++                                                        parking_reference_line.value(),
++                                                        path_integral_nominal_generator_);
++}
++
++void TerminalParkingBehavior::computeTerminalParkingPath(const SituationConstraints& situation_constraints,
++                                                         const PredictedScene& scene)
++{
++  if (!free_space_planner_.has_value()) {
++    std::cerr << "Free Space Planner not initialized. Exiting." << std::endl;
++    return;
++  }
++
++  Pose2D ego_pose{ 0.0, 0.0, 0.0 }; // Ego Pose is set at origin for free space planning
++
++  std::optional<Pose2D> goal_pose = getParkingSpotPoseInEgoFrame(scene);
++  if (!goal_pose.has_value()) {
++    std::cerr << "Failed to get goal pose for terminal parking." << std::endl;
++    return;
++  }
++
++  parking_path_ = planFreeSpacePath(free_space_planner_params_, ego_footprint_, terminal_planner_params_,
++                                    free_space_planner_.value(), scene.getTerminalMap(), ego_pose, goal_pose.value());
++  if (!parking_path_ || parking_path_.value().empty()) {
++    std::cerr << "Failed to plan terminal parking path." << std::endl;
++    return;
++  }
++  parking_path_frame_origin_ = convertGcsLocationToUtm(scene.getGCSLocation());
++}
++
++bool TerminalParkingBehavior::isTerminalParkingPathReady() const
++{
++  return parking_path_.has_value() && parking_path_frame_origin_.has_value();
++}
++
++std::optional<std::vector<Eigen::Vector3d>> TerminalParkingBehavior::getTerminalParkingPathInUtm() const
++{
++  if (!isTerminalParkingPathReady()) {
++    return {};
++  }
++
++  std::vector<Eigen::Vector3d> utm_path;
++  std::transform(parking_path_.value().begin(), parking_path_.value().end(), std::back_inserter(utm_path),
++                 [this](const Pose2D& pose) {
++                   Pose2D rotated_pose =
++                       transformPoseCoordinateFrame(pose, 0, 0, -parking_path_frame_origin_.value()[2]);
++                   Pose2D global_pose = transformPoseCoordinateFrame(
++                       rotated_pose, -parking_path_frame_origin_.value()[0], -parking_path_frame_origin_.value()[1], 0);
++                   return Eigen::Vector3d(global_pose.x, global_pose.y, global_pose.theta);
++                 });
++  return utm_path;
++}
++
++void TerminalParkingBehavior::Clear()
++{
++  // Clears the solution path generated for the Terminal Parking Behavior
++  parking_path_ = std::nullopt;
++}
++
++std::optional<Pose2D> TerminalParkingBehavior::getParkingSpotPoseInEgoFrame(const PredictedScene& scene) const
++{
++  // Should not be using terminal parking behavior without specifying a parking spot
++  assert(scene.getTerminalParkingSpotID().has_value());
++
++  auto parking_spot = scene.getTerminalMap().getTerminalParkingSpot(scene.getTerminalParkingSpotID().value());
++  if (!parking_spot.has_value()) {
++    return std::nullopt;
++  }
++
++  // Transform parking spot to ego frame
++  Pose2D parking_spot_utm_pose{ parking_spot.value().center_point.x, parking_spot.value().center_point.y,
++                                parking_spot.value().heading };
++  auto ego_utm = convertGcsLocationToUtm(scene.getGCSLocation());
++  return transformPoseCoordinateFrame(parking_spot_utm_pose, ego_utm[0], ego_utm[1], ego_utm[2]);
++}
++
++} // namespace planning
+diff --git a/planning/behavior_planner/src/behaviors/terminal_parking/terminal_unparking_behavior.cpp b/planning/behavior_planner/src/behaviors/terminal_parking/terminal_unparking_behavior.cpp
+new file mode 100644
+index 000000000..46d1b03ff
+--- /dev/null
++++ b/planning/behavior_planner/src/behaviors/terminal_parking/terminal_unparking_behavior.cpp
+@@ -0,0 +1,157 @@
++#include "behavior_planner/behaviors/terminal_parking/terminal_unparking_behavior.h"
++
++#include <Eigen/Core>
++
++#include "behavior_planner/action_target_helpers.h"
++#include "free_space_planner/angles.h"
++#include "free_space_planner/rasterization.h"
++#include "planning_common/utils/frenet_utils.h"
++
++namespace planning {
++
++TerminalUnparkingBehavior::TerminalUnparkingBehavior()
++  : unparking_path_(std::nullopt), free_space_planner_(std::nullopt)
++{
++}
++
++void TerminalUnparkingBehavior::setParams(const PlannerParameters& planner_params)
++{
++  planner_params_ = planner_params;
++  path_integral_nominal_generator_.setParams(planner_params);
++
++  free_space_planner_params_.turning_radius = planner_params_.free_space_planner.turning_radius;
++  free_space_planner_params_.transition_cost = planner_params_.free_space_planner.transition_cost;
++  free_space_planner_params_.iterations = planner_params_.free_space_planner.iterations;
++  free_space_planner_params_.search_radius = planner_params_.free_space_planner.search_radius;
++  free_space_planner_params_.cell_size = planner_params_.free_space_planner.cell_size;
++  free_space_planner_params_.space_dim_size = planner_params_.free_space_planner.space_dim_size;
++  free_space_planner_params_.angle_dim_size = planner_params_.free_space_planner.angle_dim_size;
++  free_space_planner_params_.weight1 = planner_params_.free_space_planner.weight1;
++  free_space_planner_params_.weight2 = planner_params_.free_space_planner.weight2;
++
++  ego_footprint_.reference_to_front = planner_params_.vehicle_params_.rear_axle_to_front_bumper;
++  ego_footprint_.reference_to_rear = planner_params_.vehicle_params_.rear_axle_to_rear_bumper;
++  ego_footprint_.reference_to_side = planner_params_.vehicle_params_.tractor_width / 2.0;
++
++  terminal_planner_params_.transform_min_cost = planner_params_.terminal_planner.transform_min_cost;
++  terminal_planner_params_.transform_max_cost_parking_spot =
++      planner_params_.terminal_planner.transform_max_cost_parking_spot;
++  terminal_planner_params_.transform_max_cost_static_obstacle =
++      planner_params_.terminal_planner.transform_max_cost_static_obstacle;
++  terminal_planner_params_.transform_scale_cost = planner_params_.terminal_planner.transform_scale_cost;
++  terminal_planner_params_.costmap_longitudinal_margin = planner_params_.terminal_planner.costmap_longitudinal_margin;
++  terminal_planner_params_.free_space_path_extend_distance =
++      planner_params_.terminal_planner.free_space_path_extend_distance;
++  terminal_planner_params_.free_space_path_extend_delta_distance =
++      planner_params_.terminal_planner.free_space_path_extend_delta_distance;
++
++  free_space_planner_ = FreeSpacePlanner(ego_footprint_, free_space_planner_params_);
++}
++
++std::optional<ActionTarget> TerminalUnparkingBehavior::generateAction(
++    const std::shared_ptr<const PredictedScene>& scene, const SituationConstraints& situation_constraints,
++    BehaviorPlannerDebugInfo& debug_info)
++{
++  if (!isTerminalUnparkingPathReady()) {
++    return std::nullopt;
++  }
++
++  // Get Ego pose difference in origin frame
++  const Eigen::Vector3d ego_utm = convertGcsLocationToUtm(scene->getGCSLocation());
++  const double dx_global = ego_utm[0] - unparking_path_frame_origin_.value()[0];
++  const double dy_global = ego_utm[1] - unparking_path_frame_origin_.value()[1];
++  const double origin_theta = unparking_path_frame_origin_.value()[2];
++  const Pose2D d_pose = transformPoseCoordinateFrame(Pose2D{ dx_global, dy_global, ego_utm[2] }, 0, 0, origin_theta);
++
++  // Transform parking path to current ego frame
++  std::vector<Pose2D> ego_frame_parking_path(unparking_path_.value().size());
++  std::transform(
++      unparking_path_.value().begin(), unparking_path_.value().end(), ego_frame_parking_path.begin(),
++      [d_pose](const Pose2D& pose) { return transformPoseCoordinateFrame(pose, d_pose.x, d_pose.y, d_pose.theta); });
++
++  // Build reference line from parking path
++  const std::optional<ReferenceLine> parking_reference_line = buildSplineReferenceLine(ego_frame_parking_path, 0.0);
++  if (!parking_reference_line.has_value()) {
++    std::cerr << "Failed to build reference line for terminal parking." << std::endl;
++    return std::nullopt;
++  }
++
++  const BehaviorType behavior_origin = type();
++  SpeedLimitProfile speed_limit;
++  speed_limit.setConstantSpeedLimit(planner_params_.speed_limiter.terminal_parking_speed_limit);
++
++  return action_utils::buildTerminalParkingActionTarget(behavior_origin, speed_limit, *scene, planner_params_,
++                                                        parking_reference_line.value(),
++                                                        path_integral_nominal_generator_);
++}
++
++void TerminalUnparkingBehavior::computeTerminalUnparkingPath(const SituationConstraints& situation_constraints,
++                                                             const PredictedScene& scene)
++{
++  if (!free_space_planner_.has_value()) {
++    std::cerr << "Free Space Planner not initialized. Exiting." << std::endl;
++    return;
++  }
++
++  Pose2D ego_pose{ 0.0, 0.0, 0.0 }; // Ego Pose is set at origin for free space planning
++
++  std::optional<Pose2D> goal_pose = getUnparkHandoffPoseInEgoFrame(scene);
++  if (!goal_pose.has_value()) {
++    std::cerr << "Failed to get goal pose for terminal unparking." << std::endl;
++    return;
++  }
++
++  unparking_path_ = planFreeSpacePath(free_space_planner_params_, ego_footprint_, terminal_planner_params_,
++                                      free_space_planner_.value(), scene.getTerminalMap(), ego_pose, goal_pose.value());
++  if (!unparking_path_ || unparking_path_.value().empty()) {
++    std::cerr << "Failed to plan terminal unparking path." << std::endl;
++    return;
++  }
++  unparking_path_frame_origin_ = convertGcsLocationToUtm(scene.getGCSLocation());
++}
++
++bool TerminalUnparkingBehavior::isTerminalUnparkingPathReady() const
++{
++  return unparking_path_.has_value() && unparking_path_frame_origin_.has_value();
++}
++
++std::optional<std::vector<Eigen::Vector3d>> TerminalUnparkingBehavior::getTerminalUnparkingPathInUtm() const
++{
++  if (!isTerminalUnparkingPathReady()) {
++    return {};
++  }
++
++  std::vector<Eigen::Vector3d> utm_path;
++  std::transform(unparking_path_.value().begin(), unparking_path_.value().end(), std::back_inserter(utm_path),
++                 [this](const Pose2D& pose) {
++                   Pose2D rotated_pose =
++                       transformPoseCoordinateFrame(pose, 0, 0, -unparking_path_frame_origin_.value()[2]);
++                   Pose2D global_pose =
++                       transformPoseCoordinateFrame(rotated_pose, -unparking_path_frame_origin_.value()[0],
++                                                    -unparking_path_frame_origin_.value()[1], 0);
++                   return Eigen::Vector3d(global_pose.x, global_pose.y, global_pose.theta);
++                 });
++  return utm_path;
++}
++
++void TerminalUnparkingBehavior::Clear()
++{
++  // Clears the solution path generated for the Terminal Parking Behavior
++  unparking_path_ = std::nullopt;
++}
++
++std::optional<Pose2D> TerminalUnparkingBehavior::getUnparkHandoffPoseInEgoFrame(const PredictedScene& scene) const
++{
++  std::optional<GCSLocation> unpark_handoff = scene.getTerminalUnparkHandoffPose();
++  if (!unpark_handoff.has_value()) {
++    return std::nullopt;
++  }
++
++  // Transform parking spot to ego frame
++  auto unpark_handoff_utm = convertGcsLocationToUtm(unpark_handoff.value());
++  auto ego_utm = convertGcsLocationToUtm(scene.getGCSLocation());
++  return transformPoseCoordinateFrame(Pose2D{ unpark_handoff_utm[0], unpark_handoff_utm[1], unpark_handoff_utm[2] },
++                                      ego_utm[0], ego_utm[1], ego_utm[2]);
++}
++
++} // namespace planning
+diff --git a/planning/behavior_planner/src/behaviors/terminal_unpark.cpp b/planning/behavior_planner/src/behaviors/terminal_unpark.cpp
+deleted file mode 100644
+index 813130a9a..000000000
+--- a/planning/behavior_planner/src/behaviors/terminal_unpark.cpp
++++ /dev/null
+@@ -1,47 +0,0 @@
+-#include "behavior_planner/behaviors/terminal_unpark.h"
+-
+-#include "behavior_planner/action_target_helpers.h"
+-#include "diagnostics_utils/instrumentation.h"
+-#include "planning_common/math/frenet_transformations.h"
+-#include "planning_common/utils/scene_utils.h"
+-#include "simple_trajectory_generation/simple_trajectory_generation.h"
+-
+-namespace planning {
+-
+-void TerminalUnparkBehavior::setParams(const PlannerParameters& params)
+-{
+-  params_ = params;
+-  path_integral_nominal_generator_.setParams(params);
+-}
+-
+-const PlannerParameters& TerminalUnparkBehavior::getParameters() const
+-{
+-  return params_;
+-}
+-
+-std::optional<ActionTarget> TerminalUnparkBehavior::generateAction(const std::shared_ptr<const PredictedScene>& scene,
+-                                                                 const SituationConstraints& situation_constraints,
+-                                                                 BehaviorPlannerDebugInfo& /* debug_info */)
+-{
+-  using action_utils::buildFollowLaneActionTarget;
+-
+-  // Set LaneID, BehaviorType and speed limit information
+-  const LaneID ego_lane_ref_line_id = LaneID::UNPARK_PATH;
+-  assert(scene->getReferenceLines().containsID(ego_lane_ref_line_id));
+-  const BehaviorType behavior_origin = BehaviorType::TERMINAL_UNPARK;
+-  const SpeedLimitProfile& speed_limit =
+-      situation_constraints.speed_constraints_per_behavior.at(ego_lane_ref_line_id).constraints.at(behavior_origin);
+-
+-  // Set front object
+-  const boost::optional<ObjectID> front_object_id = scene->getFrontObjectID();
+-  OverlappingObjectTrajectoryMixture front_objects;
+-  if (front_object_id) {
+-    front_objects.insert({ action_utils::fullPlanningHorizon(params_), { *front_object_id } });
+-  }
+-
+-  return buildFollowLaneActionTarget(
+-      behavior_origin, front_objects, speed_limit, ego_lane_ref_line_id /* origin lane */, *scene, params_,
+-      {} /* refined predictions */, scene->getReferenceLines(), path_integral_nominal_generator_);
+-}
+-
+-} // namespace planning
+diff --git a/planning/behavior_planner/src/nominal_tg/path_integral_nominal.cpp b/planning/behavior_planner/src/nominal_tg/path_integral_nominal.cpp
+index e23951f39..0f4486215 100644
+--- a/planning/behavior_planner/src/nominal_tg/path_integral_nominal.cpp
++++ b/planning/behavior_planner/src/nominal_tg/path_integral_nominal.cpp
+@@ -186,7 +186,7 @@ PathIntegralNominal::PathIntegralTaskResult PathIntegralNominal::samplingTask(
+ 
+     } // end for t
+     beta = std::min(beta, sample_costs(k));
+-  } // end for k
++  }   // end for k
+   return { beta, sample_collisions_per_timestep, samples_in_collision.sum(), task_idx };
+ }
+ 
+diff --git a/planning/behavior_planner/src/terminal_planner.cpp b/planning/behavior_planner/src/terminal_planner.cpp
+index def4e910f..18acc758a 100644
+--- a/planning/behavior_planner/src/terminal_planner.cpp
++++ b/planning/behavior_planner/src/terminal_planner.cpp
+@@ -1,77 +1,139 @@
+ #include "behavior_planner/terminal_planner.h"
+ 
+-#include <execution>
+-#include <utility>
+-
+ #include "behavior_planner/utils/behavior_planner_exception.h"
+ #include "diagnostics_utils/instrumentation.h"
+ #include "planning_common/utils/async_utils.h"
+-// #include "planning_msgs/LaneChangeRequest.h"
+ #include "simple_trajectory_generation/simple_trajectory_generation.h"
++#include "terminal_state_machine/terminal_state_machine.h"
+ 
+ namespace planning {
+ 
+ 
++TerminalPlanner::TerminalPlanner(ros::NodeHandle* nh, std::shared_ptr<DriverAlerts> driver_alerts,
++                                 std::shared_ptr<TruckFunctions> truck_functions_interface)
++  : follow_lane_behavior_(default_follow_lane_behavior_)
++  , parking_behavior_(default_parking_behavior_)
++  , unparking_behavior_(default_unparking_behavior_)
++{
++}
++
++TerminalPlanner::TerminalPlanner(ros::NodeHandle* nh, std::shared_ptr<DriverAlerts> driver_alerts,
++                                 std::shared_ptr<TruckFunctions> truck_functions_interface,
++                                 BehaviorBase& follow_lane_behavior, BehaviorBase& parking_behavior,
++                                 BehaviorBase& unparking_behavior)
++  : follow_lane_behavior_(follow_lane_behavior)
++  , parking_behavior_(parking_behavior)
++  , unparking_behavior_(unparking_behavior)
++{
++}
++
+ void TerminalPlanner::setParams(const PlannerParameters& params)
+ {
+   planner_params_ = params;
+-  terminal_follow_lane_behavior_.setParams(params);
+-  terminal_park_behavior_ .setParams(params);
+-  terminal_unpark_behavior_.setParams(params);
++  follow_lane_behavior_.setParams(params);
++  parking_behavior_.setParams(params);
++  unparking_behavior_.setParams(params);
+ }
+ 
+ void TerminalPlanner::reset()
+ {
++  default_parking_behavior_.Clear();
++  default_unparking_behavior_.Clear();
+ }
+ 
+-std::unordered_map<BehaviorType, ActionTarget> TerminalPlanner::planActionTargets( const SituationConstraints& situation_constraints,
+-                                                                                   const std::shared_ptr<const PredictedScene>& scene,
+-                                                                                   const OperationalDomain& operational_domain,
+-                                                                                   BehaviorPlannerDebugInfo* debug_info)
++std::unordered_map<BehaviorType, ActionTarget> TerminalPlanner::planActionTargets(
++    const SituationConstraints& situation_constraints, const std::shared_ptr<const PredictedScene>& scene,
++    const OperationalDomain& operational_domain, BehaviorPlannerDebugInfo* debug_info, bool& free_space_plan_ready)
+ {
++  using StateIndex = terminal_sm::TerminalStateMachine::StateIndex;
++
+   diagnostics_utils::SequentialExecution exec_timing;
+-  exec_timing.trace();
+   const auto current_trace_id = diagnostics_utils::TracePublisher::getCurrentSpanForThread();
++  diagnostics_utils::ScopedExecution exec_guard(CALLER_INFO());
++  exec_guard.trace(current_trace_id);
+ 
+-  // behaviors to run and results to store in
+-  std::vector<BehaviorBase*> behaviors = {};
+-  if (!operational_domain.disable_terminal) {
+-    behaviors.emplace_back(&terminal_follow_lane_behavior_);
+-    behaviors.emplace_back(&terminal_park_behavior_);
+-    behaviors.emplace_back(&terminal_unpark_behavior_);
++  std::unordered_map<BehaviorType, ActionTarget> action_target_per_behavior;
++  std::optional<ActionTarget> action_target;
++  switch (scene->getTerminalPlanningState()) {
++    case StateIndex::TERMINAL_LANE_FOLLOWING:
++    case StateIndex::TERMINAL_SINK:
++      exec_timing.start(behaviorTypeStrings.at(follow_lane_behavior_.type()), CALLER_INFO());
++      action_target = follow_lane_behavior_.generateAction(scene, situation_constraints, *debug_info);
++      if (!action_target) {
++        ROS_ERROR("Terminal planner follow lane behavior generate action failed!");
++        return {};
++      }
++      action_target_per_behavior.insert({ follow_lane_behavior_.type(), action_target.value() });
++      break;
++    case StateIndex::PARK_HANDOFF:
++      if (!parking_path_compute_in_progress_) {
++        parking_path_compute_in_progress_ = true;
++        compute_parking_path_future_ =
++            std::async(std::launch::async, [situation_constraints, scene, &free_space_plan_ready, this]() {
++              default_parking_behavior_.computeTerminalParkingPath(situation_constraints, *scene);
++              if (default_parking_behavior_.isTerminalParkingPathReady()) {
++                ROS_INFO("Terminal planner parking reference line ready!");
++                free_space_plan_ready = true;
++              }
++            });
++      }
++      exec_timing.start(behaviorTypeStrings.at(follow_lane_behavior_.type()), CALLER_INFO());
++      action_target = follow_lane_behavior_.generateAction(scene, situation_constraints, *debug_info);
++      if (!action_target) {
++        ROS_ERROR("Terminal planner follow lane behavior generate action failed!");
++        return {};
++      }
++      action_target_per_behavior.insert({ follow_lane_behavior_.type(), action_target.value() });
++      break;
++    case StateIndex::PARK:
++      if (parking_path_compute_in_progress_) {
++        parking_path_compute_in_progress_ = false;
++      }
++      exec_timing.start(behaviorTypeStrings.at(parking_behavior_.type()), CALLER_INFO());
++      action_target = parking_behavior_.generateAction(scene, situation_constraints, *debug_info);
++      if (!action_target) {
++        ROS_ERROR("Terminal planner parking behavior generate action failed!");
++        return {};
++      }
++      action_target_per_behavior.insert({ parking_behavior_.type(), action_target.value() });
++      break;
++    case StateIndex::UNPARK:
++      if (!unparking_path_ready_) {
++        // Directly compute the unparking path
++        default_unparking_behavior_.computeTerminalUnparkingPath(situation_constraints, *scene);
++        if (!default_unparking_behavior_.isTerminalUnparkingPathReady()) {
++          ROS_ERROR("Terminal planner unparking reference line failed!");
++          return {};
++        }
++        unparking_path_ready_ = true;
++      }
++      exec_timing.start(behaviorTypeStrings.at(unparking_behavior_.type()), CALLER_INFO());
++      action_target = unparking_behavior_.generateAction(scene, situation_constraints, *debug_info);
++      if (!action_target) {
++        ROS_ERROR("Terminal planner unparking behavior generate action failed!");
++        return {};
++      }
++      action_target_per_behavior.insert({ unparking_behavior_.type(), action_target.value() });
++      break;
++    default:
++      ROS_ERROR("Terminal planner engaged in non-terminal planning state!"); // This should never happen
+   }
+-  std::vector<std::optional<ActionTarget>> results(behaviors.size(), std::nullopt);
+ 
+-  // run behaviors to generate action targets
+-  const auto behavior_runner = [&scene, &situation_constraints, &debug_info,
+-                                &current_trace_id](BehaviorBase* behavior) {
+-    diagnostics_utils::ScopedExecution exec_guard(CALLER_INFO());
+-    exec_guard.trace(current_trace_id);
+-    diagnostics_utils::SequentialExecution exec_timing;
+-    exec_timing.trace();
+-    exec_timing.start(behaviorTypeStrings.at(behavior->type()) + ".generateAction", CALLER_INFO());
+-    return behavior->generateAction(scene, situation_constraints, *debug_info);
+-  };
+-  auto tasks = async_utils::asyncTransform(behaviors.begin(), behaviors.end(), results.begin(), behavior_runner);
++  exec_timing.stop();
+ 
+-  // block for all tasks to finish
+-  try {
+-    async_utils::wait(tasks);
+-  } catch (const TerminalPlannerException& e) {
+-    ROS_ERROR("TerminalPlannerException caught: %s", e.what());
+-    // return empty map to signal to planner we failed
+-    return std::unordered_map<BehaviorType, ActionTarget>();
+-  }
++  return action_target_per_behavior;
++}
+ 
+-  // convert to output type
+-  std::unordered_map<BehaviorType, ActionTarget> action_target_per_behavior;
+-  for (int k = 0; k < static_cast<int>(results.size()); ++k) {
+-    if (results.at(k)) {
+-      action_target_per_behavior[behaviors.at(k)->type()] = std::move(*results.at(k));
+-    }
++std::optional<std::vector<Eigen::Vector3d>> TerminalPlanner::getFreeSpacePath() const
++{
++  // Parking and unparking path will not be ready at the same time, return path if either is ready
++  if (default_parking_behavior_.isTerminalParkingPathReady()) {
++    return default_parking_behavior_.getTerminalParkingPathInUtm();
+   }
+-
+-  return action_target_per_behavior;
++  if (default_unparking_behavior_.isTerminalUnparkingPathReady()) {
++    return default_unparking_behavior_.getTerminalUnparkingPathInUtm();
++  }
++  return {};
+ }
+ 
+ } // namespace planning

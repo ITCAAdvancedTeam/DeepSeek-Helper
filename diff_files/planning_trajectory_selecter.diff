@@ -1,0 +1,123 @@
+diff --git a/planning/trajectory_selector/package.xml b/planning/trajectory_selector/package.xml
+index c5433b231..d08223784 100644
+--- a/planning/trajectory_selector/package.xml
++++ b/planning/trajectory_selector/package.xml
+@@ -1,57 +1,45 @@
+ <?xml version="1.0"?>
+ <package format="2">
+-  <name>trajectory_selector</name>
+-  <version>0.0.0</version>
+-  <description>The trajectory_selector package</description>
+-
+-  <!-- One maintainer tag required, multiple allowed, one person per tag -->
+-  <!-- Example:  -->
+-  <!-- <maintainer email="jane.doe@example.com">Jane Doe</maintainer> -->
+-  <maintainer email="embark-1001@todo.todo">embark-1001</maintainer>
+-
+-
+-  <!-- One license tag required, multiple allowed, one license per tag -->
+-  <!-- Commonly used license strings: -->
+-  <!--   BSD, MIT, Boost Software License, GPLv2, GPLv3, LGPLv2.1, LGPLv3 -->
+-  <license>TODO</license>
+-
+-
+-  <!-- Url tags are optional, but multiple are allowed, one per tag -->
+-  <!-- Optional attribute type can be: website, bugtracker, or repository -->
+-  <!-- Example: -->
+-  <!-- <url type="website">http://wiki.ros.org/trajectory_selector</url> -->
+-
+-
+-  <!-- Author tags are optional, multiple are allowed, one per tag -->
+-  <!-- Authors do not have to be maintainers, but could be -->
+-  <!-- Example: -->
+-  <!-- <author email="jane.doe@example.com">Jane Doe</author> -->
+-
+-
+-  <!-- The *depend tags are used to specify dependencies -->
+-  <!-- Dependencies can be catkin packages or system dependencies -->
+-  <!-- Examples: -->
+-  <!-- Use depend as a shortcut for packages that are both build and exec dependencies -->
+-  <!--   <depend>roscpp</depend> -->
+-  <!--   Note that this is equivalent to the following: -->
+-  <!--   <build_depend>roscpp</build_depend> -->
+-  <!--   <exec_depend>roscpp</exec_depend> -->
+-  <!-- Use build_depend for packages you need at compile time: -->
+-  <!--   <build_depend>message_generation</build_depend> -->
+-  <!-- Use build_export_depend for packages you need in order to build against this package: -->
+-  <!--   <build_export_depend>message_generation</build_export_depend> -->
+-  <!-- Use buildtool_depend for build tool packages: -->
+-  <!--   <buildtool_depend>catkin</buildtool_depend> -->
+-  <!-- Use exec_depend for packages you need at runtime: -->
+-  <!--   <exec_depend>message_runtime</exec_depend> -->
+-  <!-- Use test_depend for packages you need only for testing: -->
+-  <!--   <test_depend>gtest</test_depend> -->
+-  <!-- Use doc_depend for packages you need only for building documentation: -->
+-  <!--   <doc_depend>doxygen</doc_depend> -->
+-  <buildtool_depend>catkin</buildtool_depend>
+-  <depend>planning_common</depend>
+-  <depend>utils_params</depend>
+-
+-
+-
++    <name>trajectory_selector</name>
++    <version>0.0.0</version>
++    <description>The trajectory_selector package</description>
++    <!-- One maintainer tag required, multiple allowed, one person per tag -->
++    <!-- Example:  -->
++    <!-- <maintainer email="jane.doe@example.com">Jane Doe</maintainer> -->
++    <maintainer email="embark-1001@todo.todo">embark-1001</maintainer>
++    <!-- One license tag required, multiple allowed, one license per tag -->
++    <!-- Commonly used license strings: -->
++    <!--   BSD, MIT, Boost Software License, GPLv2, GPLv3, LGPLv2.1, LGPLv3 -->
++    <license>TODO</license>
++    <!-- Url tags are optional, but multiple are allowed, one per tag -->
++    <!-- Optional attribute type can be: website, bugtracker, or repository -->
++    <!-- Example: -->
++    <!-- <url type="website">http://wiki.ros.org/trajectory_selector</url> -->
++    <!-- Author tags are optional, multiple are allowed, one per tag -->
++    <!-- Authors do not have to be maintainers, but could be -->
++    <!-- Example: -->
++    <!-- <author email="jane.doe@example.com">Jane Doe</author> -->
++    <!-- The *depend tags are used to specify dependencies -->
++    <!-- Dependencies can be catkin packages or system dependencies -->
++    <!-- Examples: -->
++    <!-- Use depend as a shortcut for packages that are both build and exec dependencies -->
++    <!--   <depend>roscpp</depend> -->
++    <!--   Note that this is equivalent to the following: -->
++    <!--   <build_depend>roscpp</build_depend> -->
++    <!--   <exec_depend>roscpp</exec_depend> -->
++    <!-- Use build_depend for packages you need at compile time: -->
++    <!--   <build_depend>message_generation</build_depend> -->
++    <!-- Use build_export_depend for packages you need in order to build against this package: -->
++    <!--   <build_export_depend>message_generation</build_export_depend> -->
++    <!-- Use buildtool_depend for build tool packages: -->
++    <!--   <buildtool_depend>catkin</buildtool_depend> -->
++    <!-- Use exec_depend for packages you need at runtime: -->
++    <!--   <exec_depend>message_runtime</exec_depend> -->
++    <!-- Use test_depend for packages you need only for testing: -->
++    <!--   <test_depend>gtest</test_depend> -->
++    <!-- Use doc_depend for packages you need only for building documentation: -->
++    <!--   <doc_depend>doxygen</doc_depend> -->
++    <buildtool_depend>catkin</buildtool_depend>
++    <depend>planning_common</depend>
++    <depend>utils_params</depend>
+ </package>
+diff --git a/planning/trajectory_selector/src/trajectory_selector.cpp b/planning/trajectory_selector/src/trajectory_selector.cpp
+index b53b935f9..0bf72bd2f 100644
+--- a/planning/trajectory_selector/src/trajectory_selector.cpp
++++ b/planning/trajectory_selector/src/trajectory_selector.cpp
+@@ -129,6 +129,14 @@ ActionTargetResult TrajectorySelector::selectBestTrajectory(
+     return action_target_results.at(BehaviorType::MERGE);
+   }
+ 
++  /****************************************************************/
++  /***                       FREE SPACE                         ***/
++
++  // Otherwise, if a free space action target result exists, we choose it.
++  if (action_target_results.count(BehaviorType::FREE_SPACE) != 0) {
++    return action_target_results.at(BehaviorType::FREE_SPACE);
++  }
++
+   /****************************************************************/
+   /***                       FOLLOW ROAD                        ***/
+   /****************************************************************/

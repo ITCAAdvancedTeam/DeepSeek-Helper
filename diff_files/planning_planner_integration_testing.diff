@@ -1,0 +1,274 @@
+diff --git a/planning/planner_integration_testing/CMakeLists.txt b/planning/planner_integration_testing/CMakeLists.txt
+index e1e2baa3c..64a555564 100644
+--- a/planning/planner_integration_testing/CMakeLists.txt
++++ b/planning/planner_integration_testing/CMakeLists.txt
+@@ -17,6 +17,7 @@ set(ROS_COMPONENTS
+   roslib
+   rospy
+   rviz_visualization
++  speed_limit_tracker
+   smoothing_and_mapping
+   truck_adapter
+ )
+diff --git a/planning/planner_integration_testing/benchmark/CMakeLists.txt b/planning/planner_integration_testing/benchmark/CMakeLists.txt
+index 04abdbcd0..c049c3696 100644
+--- a/planning/planner_integration_testing/benchmark/CMakeLists.txt
++++ b/planning/planner_integration_testing/benchmark/CMakeLists.txt
+@@ -3,7 +3,7 @@ find_package(GTSAM REQUIRED)
+ find_package(rostest REQUIRED)
+ 
+ add_library(benchmark_scene_building benchmark_scene_building.cpp)
+-target_include_directories(benchmark_scene_building 
++target_include_directories(benchmark_scene_building
+     PUBLIC
+     PRIVATE SYSTEM
+     ../include
+diff --git a/planning/planner_integration_testing/benchmark/benchmark_scene_building_oakland_loop.test b/planning/planner_integration_testing/benchmark/benchmark_scene_building_oakland_loop.test
+index f6e47e697..ec174d313 100644
+--- a/planning/planner_integration_testing/benchmark/benchmark_scene_building_oakland_loop.test
++++ b/planning/planner_integration_testing/benchmark/benchmark_scene_building_oakland_loop.test
+@@ -3,7 +3,8 @@
+     <param name="route_id" value="oakland_238_680_caldecott"/>
+     <param name="/maps/map_dir" value="/home/embark/tiled_maps/usa"/>
+     <param name="/maps/map_reader_dir" value="/home/embark/tiled_maps/usa/map_reader"/>
++    <param name="maps/free_space_dir" value="/home/embark/tiled_maps/usa/free_space"/>
+     <include file="$(find maps)/launch/route_generator.launch"/>
+-  
++
+     <test test-name="benchmark_scene_building_oakland_loop" pkg="planner_integration_testing" type="benchmark_scene_building_oakland_loop" />
+ </launch>
+diff --git a/planning/planner_integration_testing/benchmark/benchmark_scene_building_ttp_loop.test b/planning/planner_integration_testing/benchmark/benchmark_scene_building_ttp_loop.test
+index d983c0bda..5815dcab1 100644
+--- a/planning/planner_integration_testing/benchmark/benchmark_scene_building_ttp_loop.test
++++ b/planning/planner_integration_testing/benchmark/benchmark_scene_building_ttp_loop.test
+@@ -3,7 +3,8 @@
+     <param name="route_id" value="ttp_loop"/>
+     <param name="/maps/map_dir" value="/home/embark/tiled_maps/usa"/>
+     <param name="/maps/map_reader_dir" value="/home/embark/tiled_maps/usa/map_reader"/>
++    <param name="maps/free_space_dir" value="/home/embark/tiled_maps/usa/free_space"/>
+     <include file="$(find maps)/launch/route_generator.launch"/>
+-  
++
+     <test test-name="benchmark_scene_building_ttp_loop" pkg="planner_integration_testing" type="benchmark_scene_building_ttp_loop" />
+ </launch>
+diff --git a/planning/planner_integration_testing/include/planner_run.h b/planning/planner_integration_testing/include/planner_run.h
+index 5c7391cde..f900bd794 100644
+--- a/planning/planner_integration_testing/include/planner_run.h
++++ b/planning/planner_integration_testing/include/planner_run.h
+@@ -12,6 +12,8 @@
+ #include <planning_msgs/PlannerOutTrajectory.h>
+ #include <predicted_scene_builder/planner_run_build_scene.h>
+ #include <predicted_scene_builder/predicted_scene_builder.h>
++#include <speed_limit_tracker/speed_limit_tracker.h>
++#include <terminal_state_machine/terminal_state_machine.h>
+ #include <truck_adapter/driver_alerts.h>
+ #include <truck_adapter/truck_functions.h>
+ #include <yaml-cpp/yaml.h>
+@@ -65,7 +67,9 @@ class PlannerRun : public PlannerLoadMaps
+ 
+   void buildScene()
+   {
+-    scene_ = scene_builder_->buildPredictedScene(scene_msg_, std::move(mappery_), lane_id_tracker_);
++    scene_ =
++        scene_builder_->buildPredictedScene(scene_msg_, std::move(mappery_), lane_id_tracker_, speed_limit_tracker_,
++                                            terminal_state_machine_, terminal_stop_go_state_machine_);
+   }
+ 
+ 
+@@ -179,6 +183,14 @@ class PlannerRun : public PlannerLoadMaps
+   PlannerVisualization planner_visualizer_{ nh_ };
+   diagnostics_utils::PublisherWrapper<planning_msgs::PlannerOutTrajectory> trajectory_pub_;
+ 
++  SpeedLimitTracker speed_limit_tracker_;
++  terminal_sm::TerminalStateMachine terminal_state_machine_{ terminal_sm::TerminalStateMachine(
++      std::vector<terminal_sm::Waypoint>(), terminal_sm::TerminalState()) };
++  terminal_stop_go_sm::TerminalStopGoStateMachine terminal_stop_go_state_machine_{
++    terminal_stop_go_sm::TerminalStopGoStateMachine(std::vector<terminal_stop_go_sm::Waypoint>(),
++                                                    terminal_stop_go_sm::TerminalState())
++  };
++
+   std::shared_ptr<PredictedSceneBuilder> scene_builder_;
+   std::shared_ptr<PredictedScene> scene_;
+ };
+diff --git a/planning/planner_integration_testing/package.xml b/planning/planner_integration_testing/package.xml
+index 19cef7a71..8e5ac6c90 100644
+--- a/planning/planner_integration_testing/package.xml
++++ b/planning/planner_integration_testing/package.xml
+@@ -1,69 +1,59 @@
+ <?xml version="1.0"?>
+ <package format="2">
+-  <name>planner_integration_testing</name>
+-  <version>0.1.0</version>
+-  <description>Run the planner in a unit test</description>
+-
+-  <!-- One maintainer tag required, multiple allowed, one person per tag -->
+-  <!-- Example:  -->
+-  <!-- <maintainer email="jane.doe@example.com">Jane Doe</maintainer> -->
+-  <maintainer email="mochan.shrestha@embarktrucks.com">Mochan Shrestha</maintainer>
+-
+-
+-  <!-- One license tag required, multiple allowed, one license per tag -->
+-  <!-- Commonly used license strings: -->
+-  <!--   BSD, MIT, Boost Software License, GPLv2, GPLv3, LGPLv2.1, LGPLv3 -->
+-  <license>Embark License</license>
+-
+-
+-  <!-- Url tags are optional, but multiple are allowed, one per tag -->
+-  <!-- Optional attribute type can be: website, bugtracker, or repository -->
+-  <!-- Example: -->
+-  <!-- <url type="website">http://wiki.ros.org/planner_integration_test</url> -->
+-
+-
+-  <!-- Author tags are optional, multiple are allowed, one per tag -->
+-  <!-- Authors do not have to be maintainers, but could be -->
+-  <!-- Example: -->
+-  <!-- <author email="jane.doe@example.com">Jane Doe</author> -->
+-  <author >Mochan Shrestha</author>
+-
+-
+-  <!-- The *depend tags are used to specify dependencies -->
+-  <!-- Dependencies can be catkin packages or system dependencies -->
+-  <!-- Examples: -->
+-  <!-- Use depend as a shortcut for packages that are both build and exec dependencies -->
+-  <!--   <depend>roscpp</depend> -->
+-  <!--   Note that this is equivalent to the following: -->
+-  <!--   <build_depend>roscpp</build_depend> -->
+-  <!--   <exec_depend>roscpp</exec_depend> -->
+-  <!-- Use build_depend for packages you need at compile time: -->
+-  <!--   <build_depend>message_generation</build_depend> -->
+-  <!-- Use build_export_depend for packages you need in order to build against this package: -->
+-  <!--   <build_export_depend>message_generation</build_export_depend> -->
+-  <!-- Use buildtool_depend for build tool packages: -->
+-  <!--   <buildtool_depend>catkin</buildtool_depend> -->
+-  <!-- Use exec_depend for packages you need at runtime: -->
+-  <!--   <exec_depend>message_runtime</exec_depend> -->
+-  <!-- Use test_depend for packages you need only for testing: -->
+-  <!--   <test_depend>gtest</test_depend> -->
+-  <!-- Use doc_depend for packages you need only for building documentation: -->
+-  <!--   <doc_depend>doxygen</doc_depend> -->
+-  <buildtool_depend>catkin</buildtool_depend>
+-  <depend>diagnostics_utils</depend>
+-  <depend>map_fusion</depend>
+-  <depend>planning_common</depend>
+-  <depend>planning_msgs</depend>
+-  <depend>predicted_scene_builder</depend>
+-  <depend>planner</depend>
+-  <depend>planner_run_test_maps</depend>
+-  <depend>planner_debug</depend>
+-  <depend>roscpp</depend>
+-  <depend>roslib</depend>
+-  <depend>rospy</depend>
+-  <depend>rviz_visualization</depend>
+-  <depend>smoothing_and_mapping</depend>
+-  <depend>truck_adapter</depend>
+-
+-
++    <name>planner_integration_testing</name>
++    <version>0.1.0</version>
++    <description>Run the planner in a unit test</description>
++    <!-- One maintainer tag required, multiple allowed, one person per tag -->
++    <!-- Example:  -->
++    <!-- <maintainer email="jane.doe@example.com">Jane Doe</maintainer> -->
++    <maintainer email="mochan.shrestha@embarktrucks.com">Mochan Shrestha</maintainer>
++    <!-- One license tag required, multiple allowed, one license per tag -->
++    <!-- Commonly used license strings: -->
++    <!--   BSD, MIT, Boost Software License, GPLv2, GPLv3, LGPLv2.1, LGPLv3 -->
++    <license>Embark License</license>
++    <!-- Url tags are optional, but multiple are allowed, one per tag -->
++    <!-- Optional attribute type can be: website, bugtracker, or repository -->
++    <!-- Example: -->
++    <!-- <url type="website">http://wiki.ros.org/planner_integration_test</url> -->
++    <!-- Author tags are optional, multiple are allowed, one per tag -->
++    <!-- Authors do not have to be maintainers, but could be -->
++    <!-- Example: -->
++    <!-- <author email="jane.doe@example.com">Jane Doe</author> -->
++    <author>Mochan Shrestha</author>
++    <!-- The *depend tags are used to specify dependencies -->
++    <!-- Dependencies can be catkin packages or system dependencies -->
++    <!-- Examples: -->
++    <!-- Use depend as a shortcut for packages that are both build and exec dependencies -->
++    <!--   <depend>roscpp</depend> -->
++    <!--   Note that this is equivalent to the following: -->
++    <!--   <build_depend>roscpp</build_depend> -->
++    <!--   <exec_depend>roscpp</exec_depend> -->
++    <!-- Use build_depend for packages you need at compile time: -->
++    <!--   <build_depend>message_generation</build_depend> -->
++    <!-- Use build_export_depend for packages you need in order to build against this package: -->
++    <!--   <build_export_depend>message_generation</build_export_depend> -->
++    <!-- Use buildtool_depend for build tool packages: -->
++    <!--   <buildtool_depend>catkin</buildtool_depend> -->
++    <!-- Use exec_depend for packages you need at runtime: -->
++    <!--   <exec_depend>message_runtime</exec_depend> -->
++    <!-- Use test_depend for packages you need only for testing: -->
++    <!--   <test_depend>gtest</test_depend> -->
++    <!-- Use doc_depend for packages you need only for building documentation: -->
++    <!--   <doc_depend>doxygen</doc_depend> -->
++    <buildtool_depend>catkin</buildtool_depend>
++    <depend>diagnostics_utils</depend>
++    <depend>map_fusion</depend>
++    <depend>planning_common</depend>
++    <depend>planning_msgs</depend>
++    <depend>predicted_scene_builder</depend>
++    <depend>planner</depend>
++    <depend>planner_run_test_maps</depend>
++    <depend>planner_debug</depend>
++    <depend>roscpp</depend>
++    <depend>roslib</depend>
++    <depend>rospy</depend>
++    <depend>rviz_visualization</depend>
++    <depend>smoothing_and_mapping</depend>
++    <depend>speed_limit_tracker</depend>
++    <depend>truck_adapter</depend>
+ </package>
+diff --git a/planning/planner_integration_testing/test/test_planner_integration_testing.test b/planning/planner_integration_testing/test/test_planner_integration_testing.test
+index e97c3064f..d8fda15ee 100644
+--- a/planning/planner_integration_testing/test/test_planner_integration_testing.test
++++ b/planning/planner_integration_testing/test/test_planner_integration_testing.test
+@@ -4,6 +4,8 @@
+   <param name="/maps/map_dir" value="/home/embark/tiled_maps/usa"/>
+   <param name="/maps/lidar_lines_dir" value="/home/embark/tiled_maps/usa/lidar_lines_dir" />
+   <param name="/maps/map_reader_dir" value="/home/embark/tiled_maps/usa/map_reader"/>
++  <param name="maps/free_space_dir" value="/home/embark/tiled_maps/usa/free_space"/>
++  <param name="enable_left_hand_drive" type="bool" value="false" />
+   <include file="$(find maps)/launch/route_generator.launch"/>
+ 
+   <test test-name="test_planner_integration_testing" pkg="planner_integration_testing" type="test_planner_integration_testing" time-limit="100"/>
+diff --git a/planning/planner_integration_testing/test/test_scene_building_from_gps_location.cpp b/planning/planner_integration_testing/test/test_scene_building_from_gps_location.cpp
+index dc33cf66e..c90207c05 100644
+--- a/planning/planner_integration_testing/test/test_scene_building_from_gps_location.cpp
++++ b/planning/planner_integration_testing/test/test_scene_building_from_gps_location.cpp
+@@ -22,13 +22,20 @@ TEST(TestSceneBuildingFromGpsLocation, TestSceneBuilding)
+   mission_plan::MissionPlan mission;
+   boost::optional<lane_map::LaneRef> last_known_ego_lane_ref;
+   LaneIDTracker lane_id_tracker;
++  SpeedLimitTracker speed_limit_tracker;
++  auto terminal_state_machine =
++      terminal_sm::TerminalStateMachine(std::vector<terminal_sm::Waypoint>(), terminal_sm::TerminalState());
++  auto terminal_stop_go_state_machine = terminal_stop_go_sm::TerminalStopGoStateMachine(
++      std::vector<terminal_stop_go_sm::Waypoint>(), terminal_stop_go_sm::TerminalState());
++
+   const auto scene_builder = std::make_shared<PredictedSceneBuilder>();
+ 
+   std::unique_ptr<const Mappery> mappery = map_build::updateMapsAndBuildMappery(
+       scene_msg.map, scene_msg.route, mission, last_known_ego_lane_ref, lane_id_tracker);
+ 
+   std::shared_ptr<PredictedScene> scene =
+-      scene_builder->buildPredictedScene(scene_msg, std::move(mappery), lane_id_tracker);
++      scene_builder->buildPredictedScene(scene_msg, std::move(mappery), lane_id_tracker, speed_limit_tracker,
++                                         terminal_state_machine, terminal_stop_go_state_machine);
+ 
+   // We should have a valid frenet graph, reference lines, and frenet projection for ego
+   ASSERT_TRUE(!scene->getFrenetGraph().getAllNodes().empty());
+diff --git a/planning/planner_integration_testing/test/test_scene_building_from_gps_location.test b/planning/planner_integration_testing/test/test_scene_building_from_gps_location.test
+index 111fae309..bcb8db1bc 100644
+--- a/planning/planner_integration_testing/test/test_scene_building_from_gps_location.test
++++ b/planning/planner_integration_testing/test/test_scene_building_from_gps_location.test
+@@ -3,6 +3,8 @@
+     <param name="route_id" value="oakland_238_680_caldecott"/>
+     <param name="/maps/map_dir" value="/home/embark/tiled_maps/usa"/>
+     <param name="/maps/map_reader_dir" value="/home/embark/tiled_maps/usa/map_reader"/>
++    <param name="maps/free_space_dir" value="/home/embark/tiled_maps/usa/free_space"/>
++    <param name="enable_left_hand_drive" type="bool" value="false" />
+     <include file="$(find maps)/launch/route_generator.launch"/>
+ 
+     <test test-name="test_scene_building_from_gps_location" pkg="planner_integration_testing" type="test_scene_building_from_gps_location" time-limit="100" />

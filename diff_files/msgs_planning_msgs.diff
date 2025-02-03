@@ -1,0 +1,18 @@
+diff --git a/msgs/planning_msgs/msg/PlannerInfo.msg b/msgs/planning_msgs/msg/PlannerInfo.msg
+index d34715624..c1d0d9b63 100644
+--- a/msgs/planning_msgs/msg/PlannerInfo.msg
++++ b/msgs/planning_msgs/msg/PlannerInfo.msg
+@@ -65,3 +65,13 @@ int32 gs_lc_direction
+ float64 total_planning_duration
+ float64 total_tgv2_duration # in seconds
+ TGv2Debug tgv2_runtimes
++
++int32 SOURCE = 0
++int32 HIGHWAY_DRIVING = 1
++int32 TERMINAL_LANE_FOLLOWING = 2
++int32 PARK_HANDOFF = 3
++int32 PARK = 4
++int32 UNPARK = 5
++int32 SINK = 6
++
++int32 terminal_state

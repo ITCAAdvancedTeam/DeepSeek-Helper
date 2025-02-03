@@ -1,0 +1,1924 @@
+diff --git a/planning/terminal_state_machine/BUILD b/planning/terminal_state_machine/BUILD
+new file mode 100644
+index 000000000..eeac03543
+--- /dev/null
++++ b/planning/terminal_state_machine/BUILD
+@@ -0,0 +1,11 @@
++cc_library(
++    name = "terminal_state_machine",
++    srcs = glob(["src/**/*.cpp"]),
++    hdrs = glob(["include/**/*.h"]),
++    includes = ["include"],
++    visibility = ["//visibility:public"],
++    deps = [
++        "//common/adk_standards",
++        "//planning/terminal_planner_libs",
++    ],
++)
+diff --git a/planning/terminal_state_machine/CMakeLists.txt b/planning/terminal_state_machine/CMakeLists.txt
+new file mode 100644
+index 000000000..5a1906192
+--- /dev/null
++++ b/planning/terminal_state_machine/CMakeLists.txt
+@@ -0,0 +1,71 @@
++cmake_minimum_required(VERSION 3.18)
++project(terminal_state_machine)
++
++# Build
++
++# add modules
++list(APPEND CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/cmake/Modules")
++
++
++set(CATKIN_COMPONENTS
++    roslib
++    roscpp
++    terminal_planner_libs
++)
++
++message(PROJECT_SOURCE_DIR: ${PROJECT_SOURCE_DIR})
++
++find_package(catkin REQUIRED COMPONENTS ${CATKIN_COMPONENTS})
++find_package(Eigen3 REQUIRED)
++find_package(Boost REQUIRED COMPONENTS)
++find_package(rosunit REQUIRED)
++find_package(terminal_planner_libs REQUIRED COMPONENTS)
++
++catkin_package(
++  INCLUDE_DIRS include
++  LIBRARIES terminal_state_machine
++  CATKIN_DEPENDS ${CATKIN_COMPONENTS}
++)
++
++set(PROJECT_INCLUDE_DIRS ${EIGEN3_INCLUDE_DIRS} ${Boost_INCLUDE_DIRS})
++include_directories(${PROJECT_INCLUDE_DIRS})
++include_directories(${PROJECT_SOURCE_DIR}/include)
++include_directories(${catkin_INCLUDE_DIRS})
++
++add_library(terminal_state_machine
++    src/terminal_state_machine/terminal_state_machine.cpp
++    src/terminal_state_machine/abstract_terminal_state.cpp
++    src/terminal_state_machine/source.cpp
++    src/terminal_state_machine/highway_driving.cpp
++    src/terminal_state_machine/terminal_lane_following.cpp
++    src/terminal_state_machine/park_handoff.cpp
++    src/terminal_state_machine/park.cpp
++    src/terminal_state_machine/unpark.cpp
++    src/terminal_state_machine/highway_sink.cpp
++    src/terminal_state_machine/terminal_sink.cpp
++    src/terminal_stop_go_state_machine/terminal_stop_go_state_machine.cpp
++    src/terminal_stop_go_state_machine/abstract_terminal_stop_go_state.cpp
++    src/terminal_stop_go_state_machine/source.cpp
++    src/terminal_stop_go_state_machine/stopped.cpp
++    src/terminal_stop_go_state_machine/driving.cpp
++    src/terminal_stop_go_state_machine/sink.cpp
++)
++
++target_link_libraries(terminal_state_machine PUBLIC
++    ${catkin_LIBRARIES}
++    ${Boost_LIBRARIES}
++    ${terminal_planner_libs_LIBRARIES}
++)
++
++# Install
++
++install(DIRECTORY include/${PROJECT_NAME}/
++  DESTINATION ${CATKIN_PACKAGE_INCLUDE_DESTINATION}
++  FILES_MATCHING PATTERN "*.h"
++)
++
++# Unit tests
++
++if(CATKIN_ENABLE_TESTING)
++    add_subdirectory(test)
++endif()
+diff --git a/planning/terminal_state_machine/README.md b/planning/terminal_state_machine/README.md
+new file mode 100644
+index 000000000..1f4c7b3ea
+--- /dev/null
++++ b/planning/terminal_state_machine/README.md
+@@ -0,0 +1,19 @@
++# Terminal Driving State Machines
++
++## Terminal State Machine
++
++This library implements the terminal driving state machine depicted below.
++![image](https://github.com/user-attachments/assets/dd01e292-5838-4ecf-ae4e-d2ad8e63945a)
++
++For more detailed descriptions about the terminal driving capabilities' design, please refer to
++the documents below:
++
++- [Design document](https://appliedintuition.atlassian.net/wiki/spaces/FRONT/pages/780697771/Terminal+Driving)
++- [Routing document](https://appliedintuition.atlassian.net/wiki/spaces/FRONT/pages/965804332/Routing+for+terminal+driving)
++
++## Terminal Stop Go State Machine
++This state machine manages the Stop and Go state of the vehicle relating to terminal stop lines.
++
++`DRIVING` transitions to `STOPPED` when Ego is at a stop line waypoint and fully stopped. `STOPPED` transitions back to `DRIVING` after Ego is stopped for more than 3 seconds at a stop line.
++
++Refer to `ExternalSignals` and `TerminalState` classes for details on state machine input and state management.
+diff --git a/planning/terminal_state_machine/include/terminal_state_machine/abstract_terminal_state.h b/planning/terminal_state_machine/include/terminal_state_machine/abstract_terminal_state.h
+new file mode 100644
+index 000000000..a1a9a0cfd
+--- /dev/null
++++ b/planning/terminal_state_machine/include/terminal_state_machine/abstract_terminal_state.h
+@@ -0,0 +1,55 @@
++#pragma once
++
++#include "adk_macros/check.h"
++#include "terminal_state_machine.h"
++
++namespace planning {
++
++namespace terminal_sm {
++
++
++/**
++ * @brief Abstract terminal state
++ *
++ * This class is an abstract class that represents a state in the terminal state machine. All such states have access to
++ * the latest external signals, the waypoints, and the terminal state.
++ */
++class AbstractTerminalState : public FSMState
++{
++ public:
++  /**
++   * @brief Constructor
++   *
++   * @param id ID of the state
++   * @param name Name of the state
++   * @param external_signals External signals that the terminal state machine needs to receive
++   * @param waypoints Waypoints that mark the places in which we transition between planners
++   * @param terminal_state Internal state of the terminal state machine
++   */
++  AbstractTerminalState(int id, const std::string& name, const ExternalSignals& external_signals,
++                        const std::vector<Waypoint>& waypoints, TerminalState& terminal_state);
++
++  int Update() override = 0;
++
++  /**
++   * @brief Get the signed distance to the currently targeting waypoint
++   *
++   * The distance will be positive if the waypoint is ahead of ego and negative if it is behind.
++   *
++   * @return Distance to the current waypoint
++   */
++  double DistanceToCurrentWaypoint() const;
++
++  /**
++   * @brief True if the vehicle is stopped
++   */
++  bool Stopped() const;
++
++ public:
++  const ExternalSignals& external_signals_; // External signals that the terminal state machine needs to receive
++  const std::vector<Waypoint>& waypoints_;  //  Waypoints that mark the places in which we transition between planners
++  TerminalState& terminal_state_;           // Internal state of the terminal state machine
++};
++
++} // namespace terminal_sm
++} // namespace planning
+diff --git a/planning/terminal_state_machine/include/terminal_state_machine/highway_driving.h b/planning/terminal_state_machine/include/terminal_state_machine/highway_driving.h
+new file mode 100644
+index 000000000..f047c69f9
+--- /dev/null
++++ b/planning/terminal_state_machine/include/terminal_state_machine/highway_driving.h
+@@ -0,0 +1,34 @@
++#pragma once
++
++#include "terminal_state_machine.h"
++#include "terminal_state_machine/abstract_terminal_state.h"
++
++namespace planning {
++
++namespace terminal_sm {
++
++/**
++ * @brief Highway driving state
++ *
++ * When this state is active, the truck behaves using the default three behaviors for highway: lane following, merging
++ * and lane changing.
++ */
++class HighwayDriving : public AbstractTerminalState
++{
++ public:
++  HighwayDriving(int id, const ExternalSignals& external_signals, const std::vector<Waypoint>& waypoints,
++                 TerminalState& terminal_state);
++
++  int Update() override;
++
++  // Outward endpoints
++  enum
++  {
++    SELF_TRANSITION,
++    OUT_OF_HIGHWAY,
++    COMPLETED,
++  };
++};
++
++} // namespace terminal_sm
++} // namespace planning
+diff --git a/planning/terminal_state_machine/include/terminal_state_machine/highway_sink.h b/planning/terminal_state_machine/include/terminal_state_machine/highway_sink.h
+new file mode 100644
+index 000000000..fb27b635e
+--- /dev/null
++++ b/planning/terminal_state_machine/include/terminal_state_machine/highway_sink.h
+@@ -0,0 +1,31 @@
++#pragma once
++
++#include "terminal_state_machine.h"
++#include "terminal_state_machine/abstract_terminal_state.h"
++
++namespace planning {
++
++namespace terminal_sm {
++
++/**
++ * @brief Sink state
++ *
++ * This state represents the final state in the terminal state machine.
++ */
++class HighwaySink : public AbstractTerminalState
++{
++ public:
++  HighwaySink(int id, const ExternalSignals& external_signals, const std::vector<Waypoint>& waypoints,
++              TerminalState& terminal_state);
++
++  int Update() override;
++
++  // Outward endpoints
++  enum
++  {
++    SELF_TRANSITION,
++  };
++};
++
++} // namespace terminal_sm
++} // namespace planning
+diff --git a/planning/terminal_state_machine/include/terminal_state_machine/park.h b/planning/terminal_state_machine/include/terminal_state_machine/park.h
+new file mode 100644
+index 000000000..bd2132a70
+--- /dev/null
++++ b/planning/terminal_state_machine/include/terminal_state_machine/park.h
+@@ -0,0 +1,32 @@
++#pragma once
++
++#include "terminal_state_machine.h"
++#include "terminal_state_machine/abstract_terminal_state.h"
++
++namespace planning {
++
++namespace terminal_sm {
++
++/**
++ * @brief Park state
++ *
++ * When this state is active, the truck is parking using the free space planner.
++ */
++class Park : public AbstractTerminalState
++{
++ public:
++  Park(int id, const ExternalSignals& external_signals, const std::vector<Waypoint>& waypoints,
++       TerminalState& terminal_state);
++
++  int Update() override;
++
++  // Outward endpoints
++  enum
++  {
++    SELF_TRANSITION,
++    PARKED,
++  };
++};
++
++} // namespace terminal_sm
++} // namespace planning
+diff --git a/planning/terminal_state_machine/include/terminal_state_machine/park_handoff.h b/planning/terminal_state_machine/include/terminal_state_machine/park_handoff.h
+new file mode 100644
+index 000000000..7c9139ee6
+--- /dev/null
++++ b/planning/terminal_state_machine/include/terminal_state_machine/park_handoff.h
+@@ -0,0 +1,44 @@
++#pragma once
++
++#include "terminal_state_machine.h"
++#include "terminal_state_machine/abstract_terminal_state.h"
++
++namespace planning {
++
++namespace terminal_sm {
++
++/**
++ * @brief Park handoff state
++ *
++ * When this state is active, the truck is at a handoff point for parking. It is responsible for handling the handoff
++ * between the lane-based planner and the free space planner.
++ */
++class ParkHandoff : public AbstractTerminalState
++{
++ public:
++  /**
++   * @brief Constructor
++   *
++   * @param id ID of the state
++   * @param external_signals External signals that the terminal state machine needs to receive
++   * @param waypoints Waypoints that mark the places in which we transition between planners
++   * @param terminal_state Internal state of the terminal state machine
++   */
++  ParkHandoff(int id, const ExternalSignals& external_signals, const std::vector<Waypoint>& waypoints,
++              TerminalState& terminal_state);
++
++  // Needed to update the handoff state variable
++  void OnExit() override;
++
++  int Update() override;
++
++  // Outward endpoints
++  enum
++  {
++    SELF_TRANSITION,
++    READY_TO_HANDOFF,
++  };
++};
++
++} // namespace terminal_sm
++} // namespace planning
+diff --git a/planning/terminal_state_machine/include/terminal_state_machine/source.h b/planning/terminal_state_machine/include/terminal_state_machine/source.h
+new file mode 100644
+index 000000000..abd1fe7ef
+--- /dev/null
++++ b/planning/terminal_state_machine/include/terminal_state_machine/source.h
+@@ -0,0 +1,35 @@
++#pragma once
++
++#include "terminal_state_machine/abstract_terminal_state.h"
++#include "terminal_state_machine/terminal_state_machine.h"
++
++namespace planning {
++
++namespace terminal_sm {
++
++/**
++ * @brief Source state
++ *
++ * This state represents the source state in the terminal state machine. It is responsible for handling the
++ * initialization of the FSM and making it possible to start it both inside and outside the terminal
++ */
++class Source : public AbstractTerminalState
++{
++ public:
++  Source(int id, const ExternalSignals& external_signals, const std::vector<Waypoint>& waypoints,
++         TerminalState& terminal_state);
++
++  int Update() override;
++
++  // Outward endpoints
++  enum
++  {
++    SELF_TRANSITION,
++    TRANSITION_TO_LANE_FOLLOWING,
++    TRANSITION_TO_UNPARK,
++    TRANSITION_TO_HIGHWAY,
++  };
++};
++
++} // namespace terminal_sm
++} // namespace planning
+diff --git a/planning/terminal_state_machine/include/terminal_state_machine/terminal_lane_following.h b/planning/terminal_state_machine/include/terminal_state_machine/terminal_lane_following.h
+new file mode 100644
+index 000000000..6d751b733
+--- /dev/null
++++ b/planning/terminal_state_machine/include/terminal_state_machine/terminal_lane_following.h
+@@ -0,0 +1,35 @@
++#pragma once
++
++#include "terminal_state_machine.h"
++#include "terminal_state_machine/abstract_terminal_state.h"
++
++namespace planning {
++
++namespace terminal_sm {
++
++/**
++ * @brief Lane following state
++ *
++ * When this state is active, the truck is lane following in the terminal. In this state, the truck also handles merges
++ * and stoplines.
++ */
++
++class TerminalLaneFollowing : public AbstractTerminalState
++{
++ public:
++  TerminalLaneFollowing(int id, const ExternalSignals& external_signals, const std::vector<Waypoint>& waypoints,
++                        TerminalState& terminal_state);
++
++  int Update() override;
++
++  // Outward endpoints
++  enum
++  {
++    SELF_TRANSITION,
++    REACHED_HANDOFF,
++    OUT_OF_TERMINAL,
++  };
++};
++
++} // namespace terminal_sm
++} // namespace planning
+diff --git a/planning/terminal_state_machine/include/terminal_state_machine/terminal_sink.h b/planning/terminal_state_machine/include/terminal_state_machine/terminal_sink.h
+new file mode 100644
+index 000000000..5d3842c64
+--- /dev/null
++++ b/planning/terminal_state_machine/include/terminal_state_machine/terminal_sink.h
+@@ -0,0 +1,31 @@
++#pragma once
++
++#include "terminal_state_machine.h"
++#include "terminal_state_machine/abstract_terminal_state.h"
++
++namespace planning {
++
++namespace terminal_sm {
++
++/**
++ * @brief Sink state
++ *
++ * This state represents the final state in the terminal state machine.
++ */
++class TerminalSink : public AbstractTerminalState
++{
++ public:
++  TerminalSink(int id, const ExternalSignals& external_signals, const std::vector<Waypoint>& waypoints,
++               TerminalState& terminal_state);
++
++  int Update() override;
++
++  // Outward endpoints
++  enum
++  {
++    SELF_TRANSITION,
++  };
++};
++
++} // namespace terminal_sm
++} // namespace planning
+diff --git a/planning/terminal_state_machine/include/terminal_state_machine/terminal_state_machine.h b/planning/terminal_state_machine/include/terminal_state_machine/terminal_state_machine.h
+new file mode 100644
+index 000000000..7bbbce000
+--- /dev/null
++++ b/planning/terminal_state_machine/include/terminal_state_machine/terminal_state_machine.h
+@@ -0,0 +1,142 @@
++#pragma once
++
++#include "state_machine/state_machine.h"
++
++namespace planning {
++
++namespace terminal_sm {
++
++/**
++ * @brief Internal state of the terminal state machine
++ */
++struct TerminalState
++{
++  bool parked{ false };      // True if the vehicle is currently parked
++  bool at_handoff{ false };  // True if the vehicle is currently at a handoff point
++  int current_waypoint{ 0 }; // Index of the waypoint ego is currently heading at. These waypoints are NOT supposed to
++                             // match 1 to 1 the ones in the route
++};
++
++/**
++ * @brief External signals that the terminal state machine needs to receive
++ */
++struct ExternalSignals
++{
++  bool in_terminal;           // True if the vehicle is in the terminal
++  double speed;               // Current speed of the vehicle
++  double travel;              // Total longitudinal distance traveled by the vehicle from the start of the trip
++  bool free_space_plan_ready; // True if the free space plan is ready
++};
++
++/**
++ * @brief Waypoint type
++ */
++enum class WaypointType
++{
++  START,             // Start of the route
++  PARKING_HANDOFF,   // Handoff point for parking
++  UNPARKING_HANDOFF, // Handoff point for unparking
++  END                // End of the route
++};
++
++/**
++ * @brief Waypoint
++ *
++ * These waypoints mark the places in which we transition between planners. They are not supposed to match 1 to 1 the
++ * ones in the route
++ */
++struct Waypoint
++{
++  double travel;     // Total longitudinal distance traveled by the vehicle from the start of the trip
++  WaypointType type; // Type of the waypoint
++};
++
++
++/**
++ * @brief Terminal state machine
++ *
++ * This state machine is responsible for managing the transitions between the different planners in the terminal. It
++ * receives external signals and updates its internal state accordingly. It also provides the current state of the
++ * terminal state machine.
++ */
++class TerminalStateMachine
++{
++ public:
++  /**
++   * @brief Enum used for readability
++   */
++  enum StateIndex
++  {
++    SOURCE,
++    HIGHWAY_DRIVING,
++    TERMINAL_LANE_FOLLOWING,
++    PARK_HANDOFF,
++    PARK,
++    UNPARK,
++    HIGHWAY_SINK,
++    TERMINAL_SINK
++  };
++
++  static bool IsTerminalPlanningActive(int state_index)
++  {
++    auto terminal_planning_state = static_cast<TerminalStateMachine::StateIndex>(state_index);
++    switch (terminal_planning_state) {
++      case StateIndex::TERMINAL_LANE_FOLLOWING:
++      case StateIndex::PARK_HANDOFF:
++      case StateIndex::PARK:
++      case StateIndex::UNPARK:
++      case StateIndex::TERMINAL_SINK:
++        return true;
++    }
++    return false;
++  }
++
++  static constexpr double REAR_AXLE_TO_FRONT_BUMPER = 7.06; // Distance from rear axle to front bumper
++
++  /**
++   * @brief Constructor
++   *
++   * @param waypoints Waypoints that mark the places in which we transition between planners
++   *
++   * @param terminal_state Initial state of the terminal state machine
++   */
++  TerminalStateMachine(std::vector<Waypoint> waypoints, TerminalState terminal_state);
++
++  /**
++   * @brief Get the current state name
++   *
++   * @return Name of the current state
++   */
++  std::string CurrentStateName() const;
++
++  /**
++   * @brief Get the current state ID
++   *
++   * @return ID of the current state
++   */
++  int CurrentStateID() const;
++
++  /**
++   * @brief Check if the vehicle should decelerate to stop
++   *
++   * @return True if the vehicle should decelerate to stop
++   */
++  bool ShouldDecelerateToStop() const;
++
++  /**
++   * @brief Update the terminal state machine
++   *
++   * @param external_signals External signals that the terminal state machine needs to receive
++   * @return Updated terminal state
++   */
++  TerminalState Update(const ExternalSignals& external_signals);
++
++ private:
++  std::vector<Waypoint> waypoints_;  // Waypoints that mark the places in which we transition between planners
++  ExternalSignals external_signals_; // External signals that the terminal state machine needs to receive
++  TerminalState terminal_state_;     // Internal state of the terminal state machine
++  FiniteStateMachine state_machine_; // State machine that manages the transitions between the different planners in the
++                                     // terminal
++};
++} // namespace terminal_sm
++} // namespace planning
+diff --git a/planning/terminal_state_machine/include/terminal_state_machine/unpark.h b/planning/terminal_state_machine/include/terminal_state_machine/unpark.h
+new file mode 100644
+index 000000000..3ecfdee40
+--- /dev/null
++++ b/planning/terminal_state_machine/include/terminal_state_machine/unpark.h
+@@ -0,0 +1,38 @@
++#pragma once
++
++#include "terminal_state_machine.h"
++#include "terminal_state_machine/abstract_terminal_state.h"
++
++namespace planning {
++
++namespace terminal_sm {
++
++/**
++ * @brief Unpark state
++ *
++ * When this state is active, the truck is unparking using the free space planner.
++ */
++class Unpark : public AbstractTerminalState
++{
++ public:
++  Unpark(int id, const ExternalSignals& external_signals, const std::vector<Waypoint>& waypoints,
++         TerminalState& terminal_state);
++
++  // Needed to update the terminal state variables
++  void OnEnter() override;
++
++  // Needed to update the terminal state variables
++  void OnExit() override;
++
++  int Update() override;
++
++  // Outward endpoints
++  enum
++  {
++    SELF_TRANSITION,
++    AT_HANDOFF,
++  };
++};
++
++} // namespace terminal_sm
++} // namespace planning
+diff --git a/planning/terminal_state_machine/include/terminal_stop_go_state_machine/abstract_terminal_stop_go_state.h b/planning/terminal_state_machine/include/terminal_stop_go_state_machine/abstract_terminal_stop_go_state.h
+new file mode 100644
+index 000000000..b630e658a
+--- /dev/null
++++ b/planning/terminal_state_machine/include/terminal_stop_go_state_machine/abstract_terminal_stop_go_state.h
+@@ -0,0 +1,58 @@
++#pragma once
++
++#include <optional>
++
++#include "adk_macros/check.h"
++#include "terminal_stop_go_state_machine.h"
++
++namespace planning {
++
++namespace terminal_stop_go_sm {
++
++/**
++ * @brief Abstract terminal state
++ *
++ * This class is an abstract class that represents a state in the terminal state machine. All such states have access to
++ * the latest external signals, the waypoints, and the terminal state.
++ */
++class AbstractState : public FSMState
++{
++ public:
++  /**
++   * @brief Constructor
++   *
++   * @param id ID of the state
++   * @param name Name of the state
++   * @param external_signals External signals that the terminal state machine needs to receive
++   * @param waypoints Waypoints that mark the places in which we transition between planners
++   * @param terminal_stop_go_state Internal state of the terminal state machine
++   */
++  AbstractState(int id, const std::string& name, const ExternalSignals& external_signals,
++                const std::vector<Waypoint>& waypoints, TerminalState& state);
++
++  int Update() override = 0;
++
++  /**
++   * @brief True if the vehicle is stopped
++   */
++  bool EgoStopped() const;
++
++  /**
++   * @brief Get the signed distance to the currently targeting waypoint
++   *
++   * The distance will be positive if the waypoint is ahead of ego and negative if it is behind.
++   *
++   * @return Distance to the current waypoint
++   */
++  double DistanceToCurrentWaypoint() const;
++
++  bool AtRouteEnd() const;
++
++ protected:
++  const ExternalSignals& external_signals_; // External signals that the terminal state machine needs to receive
++  const std::vector<Waypoint>& waypoints_;  //  Waypoints that mark the places in which we transition between planners
++  TerminalState& terminal_stop_go_state_;   // Internal state of the terminal state machine
++};
++
++} // namespace terminal_stop_go_sm
++} // namespace planning
+diff --git a/planning/terminal_state_machine/include/terminal_stop_go_state_machine/driving.h b/planning/terminal_state_machine/include/terminal_stop_go_state_machine/driving.h
+new file mode 100644
+index 000000000..3f46ca703
+--- /dev/null
++++ b/planning/terminal_state_machine/include/terminal_stop_go_state_machine/driving.h
+@@ -0,0 +1,34 @@
++#pragma once
++
++#include "terminal_stop_go_state_machine/abstract_terminal_stop_go_state.h"
++#include "terminal_stop_go_state_machine/terminal_stop_go_state_machine.h"
++
++namespace planning {
++
++namespace terminal_stop_go_sm {
++
++/**
++ * @brief Source state
++ *
++ * This state represents the source state in the terminal state machine. It is responsible for handling the
++ * initialization of the FSM and making it possible to start it both inside and outside the terminal
++ */
++class Driving : public AbstractState
++{
++ public:
++  Driving(int id, const ExternalSignals& external_signals, const std::vector<Waypoint>& waypoints,
++          TerminalState& terminal_stop_go_state);
++
++  int Update() override;
++
++  // Outward endpoints
++  enum
++  {
++    SELF_TRANSITION,
++    TRANSITION_TO_STOPPED,
++    TRANSITION_TO_END,
++  };
++};
++
++} // namespace terminal_stop_go_sm
++} // namespace planning
+diff --git a/planning/terminal_state_machine/include/terminal_stop_go_state_machine/sink.h b/planning/terminal_state_machine/include/terminal_stop_go_state_machine/sink.h
+new file mode 100644
+index 000000000..d83deb7f1
+--- /dev/null
++++ b/planning/terminal_state_machine/include/terminal_stop_go_state_machine/sink.h
+@@ -0,0 +1,31 @@
++#pragma once
++
++#include "terminal_stop_go_state_machine.h"
++#include "terminal_stop_go_state_machine/abstract_terminal_stop_go_state.h"
++
++namespace planning {
++
++namespace terminal_stop_go_sm {
++
++/**
++ * @brief Sink state
++ *
++ * This state represents the final state in the terminal state machine.
++ */
++class Sink : public AbstractState
++{
++ public:
++  Sink(int id, const ExternalSignals& external_signals, const std::vector<Waypoint>& waypoints,
++       TerminalState& terminal_stop_go_state);
++
++  int Update() override;
++
++  // Outward endpoints
++  enum
++  {
++    SELF_TRANSITION,
++  };
++};
++
++} // namespace terminal_stop_go_sm
++} // namespace planning
+diff --git a/planning/terminal_state_machine/include/terminal_stop_go_state_machine/source.h b/planning/terminal_state_machine/include/terminal_stop_go_state_machine/source.h
+new file mode 100644
+index 000000000..0c0341799
+--- /dev/null
++++ b/planning/terminal_state_machine/include/terminal_stop_go_state_machine/source.h
+@@ -0,0 +1,32 @@
++#pragma once
++
++#include "terminal_stop_go_state_machine/abstract_terminal_stop_go_state.h"
++#include "terminal_stop_go_state_machine/terminal_stop_go_state_machine.h"
++
++namespace planning {
++
++namespace terminal_stop_go_sm {
++
++/**
++ * @brief Source state
++ *
++ * This state represents the source state in the terminal state machine. It is responsible for handling the
++ * initialization of the FSM and making it possible to start it both inside and outside the terminal
++ */
++class Source : public AbstractState
++{
++ public:
++  Source(int id, const ExternalSignals& external_signals, const std::vector<Waypoint>& waypoints,
++         TerminalState& terminal_stop_go_state);
++
++  int Update() override;
++
++  // Outward endpoints
++  enum
++  {
++    TRANSITION_TO_DRIVING,
++  };
++};
++
++} // namespace terminal_stop_go_sm
++} // namespace planning
+diff --git a/planning/terminal_state_machine/include/terminal_stop_go_state_machine/stopped.h b/planning/terminal_state_machine/include/terminal_stop_go_state_machine/stopped.h
+new file mode 100644
+index 000000000..5c6853ee6
+--- /dev/null
++++ b/planning/terminal_state_machine/include/terminal_stop_go_state_machine/stopped.h
+@@ -0,0 +1,33 @@
++#pragma once
++
++#include "terminal_stop_go_state_machine/abstract_terminal_stop_go_state.h"
++#include "terminal_stop_go_state_machine/terminal_stop_go_state_machine.h"
++
++namespace planning {
++
++namespace terminal_stop_go_sm {
++
++/**
++ * @brief Source state
++ *
++ * This state represents the source state in the terminal state machine. It is responsible for handling the
++ * initialization of the FSM and making it possible to start it both inside and outside the terminal
++ */
++class Stopped : public AbstractState
++{
++ public:
++  Stopped(int id, const ExternalSignals& external_signals, const std::vector<Waypoint>& waypoints,
++          TerminalState& terminal_stop_go_state);
++
++  int Update() override;
++
++  // Outward endpoints
++  enum
++  {
++    SELF_TRANSITION,
++    TRANSITION_TO_DRIVING,
++  };
++};
++
++} // namespace terminal_stop_go_sm
++} // namespace planning
+diff --git a/planning/terminal_state_machine/include/terminal_stop_go_state_machine/terminal_stop_go_state_machine.h b/planning/terminal_state_machine/include/terminal_stop_go_state_machine/terminal_stop_go_state_machine.h
+new file mode 100644
+index 000000000..6ca149698
+--- /dev/null
++++ b/planning/terminal_state_machine/include/terminal_stop_go_state_machine/terminal_stop_go_state_machine.h
+@@ -0,0 +1,129 @@
++#pragma once
++
++#include "state_machine/state_machine.h"
++
++namespace planning {
++
++namespace terminal_stop_go_sm {
++
++/**
++ * @brief Internal state of the state machine
++ */
++struct TerminalState
++{
++  int current_waypoint{ 0 }; // Index of the waypoint ego is currently heading at. These waypoints are NOT supposed to
++                             // match 1 to 1 the ones in the route
++  long last_stop_timestamp{ 0 }; // Timestamp of the last stop (milliseconds since epoch)
++  bool waiting_for_driving_restart{ false };
++};
++
++/**
++ * @brief External signals that the terminal state machine needs to receive
++ */
++struct ExternalSignals
++{
++  double speed;   // Current speed of the vehicle
++  double travel;  // Travel distance along the route
++  long timestamp; // Current timestamp (milliseconds since epoch)
++};
++
++/**
++ * @brief Waypoint type
++ */
++enum class WaypointType
++{
++  START,     // Start of the route
++  STOP_LINE, // Stop line
++  END        // End of the route
++};
++
++/**
++ * @brief Waypoint
++ *
++ * These waypoints mark the places in which we transition between planners. They are not supposed to match 1 to 1 the
++ * ones in the route
++ */
++struct Waypoint
++{
++  int id;            // Unique id of the waypoint
++  double travel;     // Travel distance along the route
++  WaypointType type; // Type of the waypoint
++};
++
++/**
++ * @brief Terminal Stop Go State Machine
++ *
++ * This state machine is responsible for managing the transitions between ego stopping and going at stop lines in
++ * terminal areas.
++ */
++class TerminalStopGoStateMachine
++{
++ public:
++  /**
++   * @brief Enum used for readability
++   */
++  enum StateIndex
++  {
++    SOURCE,
++    DRIVING,
++    DECELERATING,
++    STOPPED,
++    SINK
++  };
++
++  static bool IsTerminalPlanningActive(int state_index)
++  {
++    return false;
++  }
++
++  static constexpr double STOP_LINE_STOP_DISTANCE = 20.0;
++  static constexpr long STOP_LINE_STOP_DURATION = 3000;
++
++  /**
++   * @brief Constructor
++   *
++   * @param waypoints Waypoints that mark route start and end, as well as any stop lines in between
++   * We assume that there are always at least 2 waypoints: start and end
++   *
++   * @param terminal_stop_go_state Initial state of the terminal state machine
++   */
++  TerminalStopGoStateMachine(std::vector<Waypoint> waypoints, TerminalState terminal_stop_go_state);
++
++  /**
++   * @brief Get the current state name
++   *
++   * @return Name of the current state
++   */
++  std::string CurrentStateName() const;
++
++  /**
++   * @brief Get the current state ID
++   *
++   * @return ID of the current state
++   */
++  int CurrentStateID() const;
++
++  /**
++   * @brief Get the current waypoint ID
++   *
++   * @return ID of the current waypoint
++   */
++  int CurrentWaypointId() const;
++
++  /**
++   * @brief Update the terminal state machine
++   *
++   * @param external_signals External signals that the terminal state machine needs to receive
++   * @return Updated terminal state
++   */
++  TerminalState Update(const ExternalSignals& external_signals);
++
++ public:
++  std::vector<Waypoint> waypoints_;      // Waypoints that mark the places in which we transition between planners
++  ExternalSignals external_signals_;     // External signals that the terminal state machine needs to receive
++  TerminalState terminal_stop_go_state_; // Internal state of the terminal state machine
++  FiniteStateMachine state_machine_; // State machine that manages the transitions between the different planners in the
++                                     // terminal
++};
++} // namespace terminal_stop_go_sm
++} // namespace planning
+diff --git a/planning/terminal_state_machine/package.xml b/planning/terminal_state_machine/package.xml
+new file mode 100644
+index 000000000..194d3c592
+--- /dev/null
++++ b/planning/terminal_state_machine/package.xml
+@@ -0,0 +1,14 @@
++<?xml version="1.0"?>
++<package format="2">
++    <name>terminal_state_machine</name>
++    <version>0.0.0</version>
++    <description>Terminal Planner general state machine</description>
++    <maintainer email="dizan@applied.co">Dizan Vasquez</maintainer>
++    <license>TODO</license>
++    <buildtool_depend>catkin</buildtool_depend>
++    <depend>roscpp</depend>
++    <depend>roslib</depend>
++    <depend>terminal_planner_libs</depend>
++    <test_depend>rosunit</test_depend>
++    <test_depend>gtest</test_depend>
++</package>
+diff --git a/planning/terminal_state_machine/src/terminal_state_machine/abstract_terminal_state.cpp b/planning/terminal_state_machine/src/terminal_state_machine/abstract_terminal_state.cpp
+new file mode 100644
+index 000000000..98a410f40
+--- /dev/null
++++ b/planning/terminal_state_machine/src/terminal_state_machine/abstract_terminal_state.cpp
+@@ -0,0 +1,25 @@
++#include "terminal_state_machine/abstract_terminal_state.h"
++
++namespace planning {
++
++namespace terminal_sm {
++
++AbstractTerminalState::AbstractTerminalState(int id, const std::string& name, const ExternalSignals& external_signals,
++                                             const std::vector<Waypoint>& waypoints, TerminalState& terminal_state)
++  : FSMState(id, name), external_signals_(external_signals), waypoints_(waypoints), terminal_state_(terminal_state)
++{
++}
++
++double AbstractTerminalState::DistanceToCurrentWaypoint() const
++{
++  return waypoints_[terminal_state_.current_waypoint].travel - external_signals_.travel;
++}
++
++bool AbstractTerminalState::Stopped() const
++{
++  return external_signals_.speed == 0.0;
++}
++
++
++} // namespace terminal_sm
++} // namespace planning
+diff --git a/planning/terminal_state_machine/src/terminal_state_machine/highway_driving.cpp b/planning/terminal_state_machine/src/terminal_state_machine/highway_driving.cpp
+new file mode 100644
+index 000000000..92b5590cd
+--- /dev/null
++++ b/planning/terminal_state_machine/src/terminal_state_machine/highway_driving.cpp
+@@ -0,0 +1,28 @@
++#include "terminal_state_machine/highway_driving.h"
++
++
++namespace planning {
++
++namespace terminal_sm {
++
++HighwayDriving::HighwayDriving(int id, const ExternalSignals& external_signals, const std::vector<Waypoint>& waypoints,
++                               TerminalState& terminal_state)
++  : AbstractTerminalState(id, "HighwayDriving", external_signals, waypoints, terminal_state)
++{
++}
++
++int HighwayDriving::Update()
++{
++  if (external_signals_.in_terminal) {
++    return OUT_OF_HIGHWAY;
++  }
++  const bool last_waypoint = waypoints_[terminal_state_.current_waypoint].type == WaypointType::END ||
++                             (terminal_state_.current_waypoint + 1) == static_cast<int>(waypoints_.size());
++  if (DistanceToCurrentWaypoint() <= 0.0 && last_waypoint) {
++    return COMPLETED;
++  }
++  return SELF_TRANSITION;
++}
++
++} // namespace terminal_sm
++} // namespace planning
+diff --git a/planning/terminal_state_machine/src/terminal_state_machine/highway_sink.cpp b/planning/terminal_state_machine/src/terminal_state_machine/highway_sink.cpp
+new file mode 100644
+index 000000000..3db5f9db1
+--- /dev/null
++++ b/planning/terminal_state_machine/src/terminal_state_machine/highway_sink.cpp
+@@ -0,0 +1,20 @@
++#include "terminal_state_machine/highway_sink.h"
++
++
++namespace planning {
++
++namespace terminal_sm {
++
++HighwaySink::HighwaySink(int id, const ExternalSignals& external_signals, const std::vector<Waypoint>& waypoints,
++                         TerminalState& terminal_state)
++  : AbstractTerminalState(id, "HighwaySink", external_signals, waypoints, terminal_state)
++{
++}
++
++int HighwaySink::Update()
++{
++  return SELF_TRANSITION;
++}
++
++} // namespace terminal_sm
++} // namespace planning
+diff --git a/planning/terminal_state_machine/src/terminal_state_machine/park.cpp b/planning/terminal_state_machine/src/terminal_state_machine/park.cpp
+new file mode 100644
+index 000000000..1440aea72
+--- /dev/null
++++ b/planning/terminal_state_machine/src/terminal_state_machine/park.cpp
+@@ -0,0 +1,23 @@
++#include "terminal_state_machine/park.h"
++
++
++namespace planning {
++
++namespace terminal_sm {
++
++Park::Park(int id, const ExternalSignals& external_signals, const std::vector<Waypoint>& waypoints,
++           TerminalState& terminal_state)
++  : AbstractTerminalState(id, "Park", external_signals, waypoints, terminal_state)
++{
++}
++
++int Park::Update()
++{
++  if (DistanceToCurrentWaypoint() <= 0.0 && Stopped()) {
++    return PARKED;
++  }
++  return SELF_TRANSITION;
++}
++
++} // namespace terminal_sm
++} // namespace planning
+diff --git a/planning/terminal_state_machine/src/terminal_state_machine/park_handoff.cpp b/planning/terminal_state_machine/src/terminal_state_machine/park_handoff.cpp
+new file mode 100644
+index 000000000..6c0838bd3
+--- /dev/null
++++ b/planning/terminal_state_machine/src/terminal_state_machine/park_handoff.cpp
+@@ -0,0 +1,30 @@
++#include "terminal_state_machine/park_handoff.h"
++
++
++namespace planning {
++
++namespace terminal_sm {
++
++ParkHandoff::ParkHandoff(int id, const ExternalSignals& external_signals, const std::vector<Waypoint>& waypoints,
++                         TerminalState& terminal_state)
++  : AbstractTerminalState(id, "ParkHandoff", external_signals, waypoints, terminal_state)
++{
++}
++
++void ParkHandoff::OnExit()
++{
++  terminal_state_.at_handoff = false;
++}
++
++int ParkHandoff::Update()
++{
++  if (external_signals_.free_space_plan_ready) {
++    CHECK(waypoints_[terminal_state_.current_waypoint].type == WaypointType::PARKING_HANDOFF);
++    terminal_state_.current_waypoint++;
++    return READY_TO_HANDOFF;
++  }
++  return SELF_TRANSITION;
++}
++
++} // namespace terminal_sm
++} // namespace planning
+diff --git a/planning/terminal_state_machine/src/terminal_state_machine/source.cpp b/planning/terminal_state_machine/src/terminal_state_machine/source.cpp
+new file mode 100644
+index 000000000..c14bf0333
+--- /dev/null
++++ b/planning/terminal_state_machine/src/terminal_state_machine/source.cpp
+@@ -0,0 +1,27 @@
++#include "terminal_state_machine/source.h"
++
++namespace planning {
++
++namespace terminal_sm {
++
++Source::Source(int id, const ExternalSignals& external_signals, const std::vector<Waypoint>& waypoints,
++               TerminalState& terminal_state)
++  : AbstractTerminalState(id, "Source", external_signals, waypoints, terminal_state)
++{
++}
++
++int Source::Update()
++{
++  terminal_state_.current_waypoint++; // Always move to the next waypoint
++  if (external_signals_.in_terminal) {
++    if (terminal_state_.parked &&
++        waypoints_[terminal_state_.current_waypoint].type == WaypointType::UNPARKING_HANDOFF) {
++      return TRANSITION_TO_UNPARK;
++    }
++    return TRANSITION_TO_LANE_FOLLOWING;
++  }
++  return TRANSITION_TO_HIGHWAY;
++}
++
++} // namespace terminal_sm
++} // namespace planning
+diff --git a/planning/terminal_state_machine/src/terminal_state_machine/terminal_lane_following.cpp b/planning/terminal_state_machine/src/terminal_state_machine/terminal_lane_following.cpp
+new file mode 100644
+index 000000000..2702365a1
+--- /dev/null
++++ b/planning/terminal_state_machine/src/terminal_state_machine/terminal_lane_following.cpp
+@@ -0,0 +1,30 @@
++#include "terminal_state_machine/terminal_lane_following.h"
++
++
++namespace planning {
++
++namespace terminal_sm {
++
++TerminalLaneFollowing::TerminalLaneFollowing(int id, const ExternalSignals& external_signals,
++                                             const std::vector<Waypoint>& waypoints, TerminalState& terminal_state)
++  : AbstractTerminalState(id, "TerminalLaneFollowing", external_signals, waypoints, terminal_state)
++{
++}
++
++int TerminalLaneFollowing::Update()
++{
++  if (!external_signals_.in_terminal) {
++    return OUT_OF_TERMINAL;
++  }
++
++  if (DistanceToCurrentWaypoint() <= TerminalStateMachine::REAR_AXLE_TO_FRONT_BUMPER && Stopped()) {
++    terminal_state_.at_handoff = true;
++  }
++  if (terminal_state_.at_handoff) {
++    return REACHED_HANDOFF;
++  }
++  return SELF_TRANSITION;
++}
++
++} // namespace terminal_sm
++} // namespace planning
+diff --git a/planning/terminal_state_machine/src/terminal_state_machine/terminal_sink.cpp b/planning/terminal_state_machine/src/terminal_state_machine/terminal_sink.cpp
+new file mode 100644
+index 000000000..b22c7448d
+--- /dev/null
++++ b/planning/terminal_state_machine/src/terminal_state_machine/terminal_sink.cpp
+@@ -0,0 +1,20 @@
++#include "terminal_state_machine/terminal_sink.h"
++
++
++namespace planning {
++
++namespace terminal_sm {
++
++TerminalSink::TerminalSink(int id, const ExternalSignals& external_signals, const std::vector<Waypoint>& waypoints,
++                           TerminalState& terminal_state)
++  : AbstractTerminalState(id, "TerminalSink", external_signals, waypoints, terminal_state)
++{
++}
++
++int TerminalSink::Update()
++{
++  return SELF_TRANSITION;
++}
++
++} // namespace terminal_sm
++} // namespace planning
+diff --git a/planning/terminal_state_machine/src/terminal_state_machine/terminal_state_machine.cpp b/planning/terminal_state_machine/src/terminal_state_machine/terminal_state_machine.cpp
+new file mode 100644
+index 000000000..b9f810b75
+--- /dev/null
++++ b/planning/terminal_state_machine/src/terminal_state_machine/terminal_state_machine.cpp
+@@ -0,0 +1,111 @@
++#include "terminal_state_machine/terminal_state_machine.h"
++
++#include <algorithm>
++#include <cmath>
++
++#include "terminal_state_machine/highway_driving.h"
++#include "terminal_state_machine/highway_sink.h"
++#include "terminal_state_machine/park.h"
++#include "terminal_state_machine/park_handoff.h"
++#include "terminal_state_machine/source.h"
++#include "terminal_state_machine/terminal_lane_following.h"
++#include "terminal_state_machine/terminal_sink.h"
++#include "terminal_state_machine/unpark.h"
++
++namespace planning {
++
++namespace terminal_sm {
++
++namespace {
++
++FiniteStateMachine BuildFSM(const ExternalSignals& external_signals, const std::vector<Waypoint>& waypoints,
++                            TerminalState& terminal_state)
++{
++  using sm = TerminalStateMachine;
++  std::vector<std::unique_ptr<FSMState>> states;
++  states.push_back(std::make_unique<Source>(sm::SOURCE, external_signals, waypoints, terminal_state));
++  states.push_back(std::make_unique<HighwayDriving>(sm::HIGHWAY_DRIVING, external_signals, waypoints, terminal_state));
++  states.push_back(std::make_unique<TerminalLaneFollowing>(sm::TERMINAL_LANE_FOLLOWING, external_signals, waypoints,
++                                                           terminal_state));
++  states.push_back(std::make_unique<ParkHandoff>(sm::PARK_HANDOFF, external_signals, waypoints, terminal_state));
++  states.push_back(std::make_unique<Park>(sm::PARK, external_signals, waypoints, terminal_state));
++  states.push_back(std::make_unique<Unpark>(sm::UNPARK, external_signals, waypoints, terminal_state));
++  states.push_back(std::make_unique<HighwaySink>(sm::HIGHWAY_SINK, external_signals, waypoints, terminal_state));
++  states.push_back(std::make_unique<TerminalSink>(sm::TERMINAL_SINK, external_signals, waypoints, terminal_state));
++
++
++  std::map<int, std::map<int, int>> transitions;
++  transitions.emplace(sm::SOURCE,
++                      std::map<int, int>{ { Source::SELF_TRANSITION, sm::SOURCE },
++                                          { Source::TRANSITION_TO_UNPARK, sm::UNPARK },
++                                          { Source::TRANSITION_TO_LANE_FOLLOWING, sm::TERMINAL_LANE_FOLLOWING },
++                                          { Source::TRANSITION_TO_HIGHWAY, sm::HIGHWAY_DRIVING } });
++  transitions.emplace(sm::HIGHWAY_DRIVING,
++                      std::map<int, int>{ { HighwayDriving::SELF_TRANSITION, sm::HIGHWAY_DRIVING },
++                                          { HighwayDriving::OUT_OF_HIGHWAY, sm::TERMINAL_LANE_FOLLOWING },
++                                          { HighwayDriving::COMPLETED, sm::HIGHWAY_SINK } });
++  transitions.emplace(sm::TERMINAL_LANE_FOLLOWING,
++                      std::map<int, int>{ { TerminalLaneFollowing::SELF_TRANSITION, sm::TERMINAL_LANE_FOLLOWING },
++                                          { TerminalLaneFollowing::REACHED_HANDOFF, sm::PARK_HANDOFF },
++                                          { TerminalLaneFollowing::OUT_OF_TERMINAL, sm::HIGHWAY_DRIVING } });
++
++  transitions.emplace(sm::PARK_HANDOFF, std::map<int, int>{ { ParkHandoff::SELF_TRANSITION, sm::PARK_HANDOFF },
++                                                            { ParkHandoff::READY_TO_HANDOFF, sm::PARK } });
++
++  transitions.emplace(sm::PARK,
++                      std::map<int, int>{ { Park::SELF_TRANSITION, sm::PARK }, { Park::PARKED, sm::TERMINAL_SINK } });
++  transitions.emplace(sm::UNPARK, std::map<int, int>{ { Unpark::SELF_TRANSITION, sm::UNPARK },
++                                                      { Unpark::AT_HANDOFF, sm::TERMINAL_LANE_FOLLOWING } });
++  transitions.emplace(sm::HIGHWAY_SINK, std::map<int, int>{ { HighwaySink::SELF_TRANSITION, sm::HIGHWAY_SINK } });
++  transitions.emplace(sm::TERMINAL_SINK, std::map<int, int>{ { TerminalSink::SELF_TRANSITION, sm::TERMINAL_SINK } });
++
++  return { std::move(states), std::move(transitions), 0 };
++}
++
++} // namespace
++
++TerminalStateMachine::TerminalStateMachine(std::vector<Waypoint> waypoints, TerminalState terminal_state)
++  : waypoints_(std::move(waypoints))
++  , terminal_state_(std::move(terminal_state))
++  , state_machine_(BuildFSM(external_signals_, waypoints_, terminal_state_))
++{
++}
++
++std::string TerminalStateMachine::CurrentStateName() const
++{
++  return state_machine_.current_state()->name();
++}
++
++int TerminalStateMachine::CurrentStateID() const
++{
++  return state_machine_.current_state()->id();
++}
++
++bool TerminalStateMachine::ShouldDecelerateToStop() const
++{
++  if (waypoints_.size() <= terminal_state_.current_waypoint) {
++    return false;
++  }
++  Waypoint current_waypoint = waypoints_[terminal_state_.current_waypoint];
++  if ((current_waypoint.type == WaypointType::UNPARKING_HANDOFF && CurrentStateID() == StateIndex::UNPARK) ||
++      (current_waypoint.type == WaypointType::END && CurrentStateID() == StateIndex::PARK)) {
++    double distance_to_waypoint = current_waypoint.travel - external_signals_.travel;
++    // Fixed distance for now that is tuned to parking speed of 1.5 m/s
++    // TODO: replaced with a more algorithmic approach
++    if (distance_to_waypoint <= 4.0) {
++      return true;
++    }
++  }
++  return false;
++}
++
++TerminalState TerminalStateMachine::Update(const ExternalSignals& external_signals)
++{
++  external_signals_ = external_signals;
++  state_machine_.Step();
++  return terminal_state_;
++}
++
++
++} // namespace terminal_sm
++} // namespace planning
+diff --git a/planning/terminal_state_machine/src/terminal_state_machine/unpark.cpp b/planning/terminal_state_machine/src/terminal_state_machine/unpark.cpp
+new file mode 100644
+index 000000000..49c5c0a70
+--- /dev/null
++++ b/planning/terminal_state_machine/src/terminal_state_machine/unpark.cpp
+@@ -0,0 +1,36 @@
++#include "terminal_state_machine/unpark.h"
++
++
++namespace planning {
++
++namespace terminal_sm {
++
++Unpark::Unpark(int id, const ExternalSignals& external_signals, const std::vector<Waypoint>& waypoints,
++               TerminalState& terminal_state)
++  : AbstractTerminalState(id, "Unpark", external_signals, waypoints, terminal_state)
++{
++}
++
++void Unpark::OnEnter()
++{
++  terminal_state_.parked = false;
++}
++
++void Unpark::OnExit()
++{
++  terminal_state_.at_handoff = false;
++}
++
++int Unpark::Update()
++{
++  if (DistanceToCurrentWaypoint() <= 0.0 && Stopped()) {
++    terminal_state_.at_handoff = true;
++    CHECK(waypoints_[terminal_state_.current_waypoint].type == WaypointType::UNPARKING_HANDOFF);
++    terminal_state_.current_waypoint++;
++    return AT_HANDOFF;
++  }
++  return SELF_TRANSITION;
++}
++
++} // namespace terminal_sm
++} // namespace planning
+diff --git a/planning/terminal_state_machine/src/terminal_stop_go_state_machine/abstract_terminal_stop_go_state.cpp b/planning/terminal_state_machine/src/terminal_stop_go_state_machine/abstract_terminal_stop_go_state.cpp
+new file mode 100644
+index 000000000..96faafc3a
+--- /dev/null
++++ b/planning/terminal_state_machine/src/terminal_stop_go_state_machine/abstract_terminal_stop_go_state.cpp
+@@ -0,0 +1,33 @@
++#include "terminal_stop_go_state_machine/abstract_terminal_stop_go_state.h"
++
++namespace planning {
++
++namespace terminal_stop_go_sm {
++
++AbstractState::AbstractState(int id, const std::string& name, const ExternalSignals& external_signals,
++                             const std::vector<Waypoint>& waypoints, TerminalState& state)
++  : FSMState(id, name), external_signals_(external_signals), waypoints_(waypoints), terminal_stop_go_state_(state)
++{
++}
++
++bool AbstractState::EgoStopped() const
++{
++  return external_signals_.speed == 0.0;
++}
++
++double AbstractState::DistanceToCurrentWaypoint() const
++{
++  return waypoints_[terminal_stop_go_state_.current_waypoint].travel - external_signals_.travel;
++}
++
++bool AbstractState::AtRouteEnd() const
++{
++  if (waypoints_[terminal_stop_go_state_.current_waypoint].type == WaypointType::END) {
++    return DistanceToCurrentWaypoint() <= 0.0;
++  }
++  return false;
++}
++
++
++} // namespace terminal_stop_go_sm
++} // namespace planning
+diff --git a/planning/terminal_state_machine/src/terminal_stop_go_state_machine/driving.cpp b/planning/terminal_state_machine/src/terminal_stop_go_state_machine/driving.cpp
+new file mode 100644
+index 000000000..b220922a8
+--- /dev/null
++++ b/planning/terminal_state_machine/src/terminal_stop_go_state_machine/driving.cpp
+@@ -0,0 +1,28 @@
++#include "terminal_stop_go_state_machine/driving.h"
++
++#include <cmath>
++
++namespace planning {
++
++namespace terminal_stop_go_sm {
++
++Driving::Driving(int id, const ExternalSignals& external_signals, const std::vector<Waypoint>& waypoints,
++                 TerminalState& state)
++  : AbstractState(id, "Driving", external_signals, waypoints, state)
++{
++}
++
++int Driving::Update()
++{
++  if (waypoints_[terminal_stop_go_state_.current_waypoint].type == WaypointType::STOP_LINE && EgoStopped()) {
++    terminal_stop_go_state_.last_stop_timestamp = external_signals_.timestamp;
++    return TRANSITION_TO_STOPPED;
++  }
++  if (AtRouteEnd()) {
++    return TRANSITION_TO_END;
++  }
++  return SELF_TRANSITION;
++}
++
++} // namespace terminal_stop_go_sm
++} // namespace planning
+diff --git a/planning/terminal_state_machine/src/terminal_stop_go_state_machine/sink.cpp b/planning/terminal_state_machine/src/terminal_stop_go_state_machine/sink.cpp
+new file mode 100644
+index 000000000..cd5f78547
+--- /dev/null
++++ b/planning/terminal_state_machine/src/terminal_stop_go_state_machine/sink.cpp
+@@ -0,0 +1,20 @@
++#include "terminal_stop_go_state_machine/sink.h"
++
++
++namespace planning {
++
++namespace terminal_stop_go_sm {
++
++Sink::Sink(int id, const ExternalSignals& external_signals, const std::vector<Waypoint>& waypoints,
++           TerminalState& state)
++  : AbstractState(id, "Sink", external_signals, waypoints, state)
++{
++}
++
++int Sink::Update()
++{
++  return SELF_TRANSITION;
++}
++
++} // namespace terminal_stop_go_sm
++} // namespace planning
+diff --git a/planning/terminal_state_machine/src/terminal_stop_go_state_machine/source.cpp b/planning/terminal_state_machine/src/terminal_stop_go_state_machine/source.cpp
+new file mode 100644
+index 000000000..18551f982
+--- /dev/null
++++ b/planning/terminal_state_machine/src/terminal_stop_go_state_machine/source.cpp
+@@ -0,0 +1,20 @@
++#include "terminal_stop_go_state_machine/source.h"
++
++namespace planning {
++
++namespace terminal_stop_go_sm {
++
++Source::Source(int id, const ExternalSignals& external_signals, const std::vector<Waypoint>& waypoints,
++               TerminalState& state)
++  : AbstractState(id, "Source", external_signals, waypoints, state)
++{
++}
++
++int Source::Update()
++{
++  terminal_stop_go_state_.current_waypoint++; // Always move to the next waypoint
++  return TRANSITION_TO_DRIVING;
++}
++
++} // namespace terminal_stop_go_sm
++} // namespace planning
+diff --git a/planning/terminal_state_machine/src/terminal_stop_go_state_machine/stopped.cpp b/planning/terminal_state_machine/src/terminal_stop_go_state_machine/stopped.cpp
+new file mode 100644
+index 000000000..89c9fbe73
+--- /dev/null
++++ b/planning/terminal_state_machine/src/terminal_stop_go_state_machine/stopped.cpp
+@@ -0,0 +1,30 @@
++#include "terminal_stop_go_state_machine/stopped.h"
++
++namespace planning {
++
++namespace terminal_stop_go_sm {
++
++Stopped::Stopped(int id, const ExternalSignals& external_signals, const std::vector<Waypoint>& waypoints,
++                 TerminalState& state)
++  : AbstractState(id, "Stopped", external_signals, waypoints, state)
++{
++}
++
++int Stopped::Update()
++{
++  if (external_signals_.timestamp - terminal_stop_go_state_.last_stop_timestamp >
++      TerminalStopGoStateMachine::STOP_LINE_STOP_DURATION) {
++    if (!terminal_stop_go_state_.waiting_for_driving_restart) {
++      terminal_stop_go_state_.current_waypoint++; // Move on to next waypoint
++      terminal_stop_go_state_.waiting_for_driving_restart = true;
++    }
++  }
++  if (terminal_stop_go_state_.waiting_for_driving_restart && !EgoStopped()) {
++    terminal_stop_go_state_.waiting_for_driving_restart = false;
++    return TRANSITION_TO_DRIVING;
++  }
++  return SELF_TRANSITION;
++}
++
++} // namespace terminal_stop_go_sm
++} // namespace planning
+diff --git a/planning/terminal_state_machine/src/terminal_stop_go_state_machine/terminal_stop_go_state_machine.cpp b/planning/terminal_state_machine/src/terminal_stop_go_state_machine/terminal_stop_go_state_machine.cpp
+new file mode 100644
+index 000000000..3a4220248
+--- /dev/null
++++ b/planning/terminal_state_machine/src/terminal_stop_go_state_machine/terminal_stop_go_state_machine.cpp
+@@ -0,0 +1,73 @@
++#include "terminal_stop_go_state_machine/terminal_stop_go_state_machine.h"
++
++#include <algorithm>
++#include <cmath>
++
++#include "terminal_stop_go_state_machine/driving.h"
++#include "terminal_stop_go_state_machine/sink.h"
++#include "terminal_stop_go_state_machine/source.h"
++#include "terminal_stop_go_state_machine/stopped.h"
++
++namespace planning {
++
++namespace terminal_stop_go_sm {
++
++namespace {
++
++FiniteStateMachine BuildFSM(const ExternalSignals& external_signals, const std::vector<Waypoint>& waypoints,
++                            TerminalState& terminal_stop_go_state)
++{
++  using sm = TerminalStopGoStateMachine;
++  std::vector<std::unique_ptr<FSMState>> states;
++  states.push_back(std::make_unique<Source>(sm::SOURCE, external_signals, waypoints, terminal_stop_go_state));
++  states.push_back(std::make_unique<Driving>(sm::DRIVING, external_signals, waypoints, terminal_stop_go_state));
++  states.push_back(std::make_unique<Stopped>(sm::STOPPED, external_signals, waypoints, terminal_stop_go_state));
++  states.push_back(std::make_unique<Sink>(sm::SINK, external_signals, waypoints, terminal_stop_go_state));
++
++  std::map<int, std::map<int, int>> transitions;
++  transitions.emplace(sm::SOURCE, std::map<int, int>{ { Source::TRANSITION_TO_DRIVING, sm::DRIVING } });
++  transitions.emplace(sm::DRIVING, std::map<int, int>{ { Driving::SELF_TRANSITION, sm::DRIVING },
++                                                       { Driving::TRANSITION_TO_STOPPED, sm::STOPPED },
++                                                       { Driving::TRANSITION_TO_END, sm::SINK } });
++  transitions.emplace(sm::STOPPED, std::map<int, int>{ { Stopped::SELF_TRANSITION, sm::STOPPED },
++                                                       { Stopped::TRANSITION_TO_DRIVING, sm::DRIVING } });
++  transitions.emplace(sm::SINK, std::map<int, int>{ { Sink::SELF_TRANSITION, sm::SINK } });
++
++  return { std::move(states), std::move(transitions), 0 };
++}
++
++} // namespace
++
++TerminalStopGoStateMachine::TerminalStopGoStateMachine(std::vector<Waypoint> waypoints,
++                                                       TerminalState terminal_stop_go_state)
++  : waypoints_(std::move(waypoints))
++  , terminal_stop_go_state_(std::move(terminal_stop_go_state))
++  , state_machine_(BuildFSM(external_signals_, waypoints_, terminal_stop_go_state_))
++{
++}
++
++std::string TerminalStopGoStateMachine::CurrentStateName() const
++{
++  return state_machine_.current_state()->name();
++}
++
++int TerminalStopGoStateMachine::CurrentStateID() const
++{
++  return state_machine_.current_state()->id();
++}
++
++int TerminalStopGoStateMachine::CurrentWaypointId() const
++{
++  return waypoints_[terminal_stop_go_state_.current_waypoint].id;
++}
++
++TerminalState TerminalStopGoStateMachine::Update(const ExternalSignals& external_signals)
++{
++  external_signals_ = external_signals;
++  state_machine_.Step();
++  return terminal_stop_go_state_;
++}
++
++
++} // namespace terminal_stop_go_sm
++} // namespace planning
+diff --git a/planning/terminal_state_machine/test/BUILD b/planning/terminal_state_machine/test/BUILD
+new file mode 100644
+index 000000000..666535534
+--- /dev/null
++++ b/planning/terminal_state_machine/test/BUILD
+@@ -0,0 +1,9 @@
++cc_test(
++    name = "terminal_state_machine_test",
++    srcs = ["terminal_state_machine_test.cpp"],
++    linkstatic = True,
++    deps = [
++        "//planning/terminal_state_machine",
++        "@com_google_googletest//:gtest",
++    ],
++)
+diff --git a/planning/terminal_state_machine/test/CMakeLists.txt b/planning/terminal_state_machine/test/CMakeLists.txt
+new file mode 100644
+index 000000000..e809f7013
+--- /dev/null
++++ b/planning/terminal_state_machine/test/CMakeLists.txt
+@@ -0,0 +1,4 @@
++# Unit tests
++
++catkin_add_gtest(terminal_state_machine_test terminal_state_machine_test.cpp)
++target_link_libraries(terminal_state_machine_test terminal_state_machine ${catkin_LIBRARIES} ${rosunit_LIBRARIES})
+diff --git a/planning/terminal_state_machine/test/terminal_state_machine_test.cpp b/planning/terminal_state_machine/test/terminal_state_machine_test.cpp
+new file mode 100644
+index 000000000..9982aed48
+--- /dev/null
++++ b/planning/terminal_state_machine/test/terminal_state_machine_test.cpp
+@@ -0,0 +1,214 @@
++#include "terminal_state_machine/terminal_state_machine.h"
++
++#include <math.h>
++
++#include <iostream>
++
++#include "gtest/gtest.h"
++
++namespace planning {
++
++namespace terminal_sm {
++namespace {
++
++TEST(TERMINAL_STATE_MACHINE, FullSequenceTerminalToTerminal)
++{
++  using sm = TerminalStateMachine;
++  TerminalState terminal_state{
++    .parked = true,
++    .at_handoff = false,
++    .current_waypoint = 0,
++  };
++
++  std::vector<Waypoint> waypoints{
++    { 0.0, WaypointType::START },
++    { 10.0, WaypointType::UNPARKING_HANDOFF },
++    { 1000.0, WaypointType::PARKING_HANDOFF },
++    { 1010.0, WaypointType::END },
++  };
++
++  ExternalSignals external_signals{ .in_terminal = true, .speed = 0.0, .travel = 0.0, .free_space_plan_ready = false };
++
++  TerminalStateMachine state_machine(waypoints, terminal_state);
++  ASSERT_EQ(state_machine.CurrentStateID(), sm::SOURCE);
++
++  // Since we are in the terminal, and parked we should transition to the unpark state
++  state_machine.Update(external_signals);
++  ASSERT_EQ(state_machine.CurrentStateID(), sm::UNPARK);
++
++  // As long as we are not at the handoff, we should stay in the unpark state
++  external_signals.travel = 1.0;
++  external_signals.speed = 5.0;
++  state_machine.Update(external_signals);
++  ASSERT_EQ(state_machine.CurrentStateID(), sm::UNPARK);
++
++  // Once we reach the handoff, we should transition to lane following
++  external_signals.travel = 10.0;
++  external_signals.speed = 0.0;
++  state_machine.Update(external_signals);
++  ASSERT_EQ(state_machine.CurrentStateID(), sm::TERMINAL_LANE_FOLLOWING);
++
++  // As long as we are not out of the terminal, we should stay in the lane following state
++  external_signals.travel = 100.0;
++  external_signals.speed = 10.0;
++  state_machine.Update(external_signals);
++  ASSERT_EQ(state_machine.CurrentStateID(), sm::TERMINAL_LANE_FOLLOWING);
++
++  // Once we are out of the terminal, we should transition to highway driving
++  external_signals.in_terminal = false;
++  state_machine.Update(external_signals);
++  ASSERT_EQ(state_machine.CurrentStateID(), sm::HIGHWAY_DRIVING);
++
++  // As long as nothing changes, we should stay in the highway driving state
++  external_signals.travel = 900.0;
++  state_machine.Update(external_signals);
++  ASSERT_EQ(state_machine.CurrentStateID(), sm::HIGHWAY_DRIVING);
++
++  // Once we get into the destination terminal, we should transition to lane following
++  external_signals.in_terminal = true;
++  state_machine.Update(external_signals);
++  ASSERT_EQ(state_machine.CurrentStateID(), sm::TERMINAL_LANE_FOLLOWING);
++
++  // As long as we are not at the handoff, we should stay in the lane following state
++  external_signals.travel = 990.0;
++  external_signals.speed = 1.0;
++  state_machine.Update(external_signals);
++  ASSERT_EQ(state_machine.CurrentStateID(), sm::TERMINAL_LANE_FOLLOWING);
++
++  // Once we reach the handoff, we should transition to park handoff
++  external_signals.travel = 1000.0;
++  external_signals.speed = 0.0;
++  state_machine.Update(external_signals);
++  ASSERT_EQ(state_machine.CurrentStateID(), sm::PARK_HANDOFF);
++
++  // As long as the free space plan is not ready, we should stay in the park handoff state
++  state_machine.Update(external_signals);
++  ASSERT_EQ(state_machine.CurrentStateID(), sm::PARK_HANDOFF);
++
++  // Once the free space plan is ready, we should transition to parking
++  external_signals.free_space_plan_ready = true;
++  state_machine.Update(external_signals);
++  ASSERT_EQ(state_machine.CurrentStateID(), sm::PARK);
++
++  // As long as we are still parking, we should stay in the park state
++  external_signals.travel = 1005.0;
++  external_signals.speed = 1.0;
++  state_machine.Update(external_signals);
++  ASSERT_EQ(state_machine.CurrentStateID(), sm::PARK);
++
++  // Once we are parked, we should transition to the sink state
++  external_signals.travel = 1010.0;
++  external_signals.speed = 0.0;
++  state_machine.Update(external_signals);
++  ASSERT_EQ(state_machine.CurrentStateID(), sm::TERMINAL_SINK);
++
++  // We are done, so we should stay in the sink state
++  state_machine.Update(external_signals);
++  ASSERT_EQ(state_machine.CurrentStateID(), sm::TERMINAL_SINK);
++}
++
++
++TEST(TERMINAL_STATE_MACHINE, HighwayToTerminalParking)
++{
++  using sm = TerminalStateMachine;
++  TerminalState terminal_state{
++    .parked = true,
++    .at_handoff = false,
++    .current_waypoint = 0,
++  };
++
++  std::vector<Waypoint> waypoints{
++    { 0.0, WaypointType::START },
++    { 1000.0, WaypointType::PARKING_HANDOFF },
++    { 1010.0, WaypointType::END },
++  };
++
++  ExternalSignals external_signals{
++    .in_terminal = false, .speed = 20.0, .travel = 0.0, .free_space_plan_ready = false
++  };
++
++  TerminalStateMachine state_machine(waypoints, terminal_state);
++  ASSERT_EQ(state_machine.CurrentStateID(), sm::SOURCE);
++
++  // Since we are not in terminal, transition to highway driving
++  state_machine.Update(external_signals);
++  ASSERT_EQ(state_machine.CurrentStateID(), sm::HIGHWAY_DRIVING);
++
++  // Once we are inside terminal, we should transition to lane following
++  external_signals.travel = 500.0;
++  external_signals.speed = 0.0;
++  external_signals.in_terminal = true;
++  state_machine.Update(external_signals);
++  ASSERT_EQ(state_machine.CurrentStateID(), sm::TERMINAL_LANE_FOLLOWING);
++
++  // Once we reach the handoff, we should transition to park handoff
++  external_signals.travel = 1000.0;
++  external_signals.speed = 0.0;
++  state_machine.Update(external_signals);
++  ASSERT_EQ(state_machine.CurrentStateID(), sm::PARK_HANDOFF);
++
++  // Once the free space plan is ready, we should transition to parking
++  external_signals.free_space_plan_ready = true;
++  state_machine.Update(external_signals);
++  ASSERT_EQ(state_machine.CurrentStateID(), sm::PARK);
++
++  // Once we are parked, we should transition to the sink state
++  external_signals.travel = 1010.0;
++  external_signals.speed = 0.0;
++  state_machine.Update(external_signals);
++  ASSERT_EQ(state_machine.CurrentStateID(), sm::TERMINAL_SINK);
++}
++
++TEST(TERMINAL_STATE_MACHINE, TerminalParkingToHighway)
++{
++  using sm = TerminalStateMachine;
++  TerminalState terminal_state{
++    .parked = true,
++    .at_handoff = false,
++    .current_waypoint = 0,
++  };
++
++  std::vector<Waypoint> waypoints{
++    { 0.0, WaypointType::START },
++    { 10.0, WaypointType::UNPARKING_HANDOFF },
++    { 1000.0, WaypointType::END },
++  };
++
++  ExternalSignals external_signals{ .in_terminal = true, .speed = 0.0, .travel = 0.0, .free_space_plan_ready = false };
++
++  TerminalStateMachine state_machine(waypoints, terminal_state);
++  ASSERT_EQ(state_machine.CurrentStateID(), sm::SOURCE);
++
++  // Since we are in terminal and parked, transition to UNPARK
++  state_machine.Update(external_signals);
++  ASSERT_EQ(state_machine.CurrentStateID(), sm::UNPARK);
++
++  // Once we reach the handoff, we should transition to lane following
++  external_signals.travel = 10.0;
++  external_signals.speed = 0.0;
++  state_machine.Update(external_signals);
++  ASSERT_EQ(state_machine.CurrentStateID(), sm::TERMINAL_LANE_FOLLOWING);
++
++  // Once we exit the terminal, we should transition to highway driving
++  external_signals.travel = 500.0;
++  external_signals.speed = 20.0;
++  external_signals.in_terminal = false;
++  state_machine.Update(external_signals);
++  ASSERT_EQ(state_machine.CurrentStateID(), sm::HIGHWAY_DRIVING);
++
++  // Once we reached route end, we should transition to the sink state
++  external_signals.travel = 1000.0;
++  external_signals.speed = 20.0;
++  state_machine.Update(external_signals);
++  ASSERT_EQ(state_machine.CurrentStateID(), sm::HIGHWAY_SINK);
++}
++
++} // namespace
++} // namespace terminal_sm
++} // namespace planning
++
++int main(int argc, char** argv)
++{
++  testing::InitGoogleTest(&argc, argv);
++  return RUN_ALL_TESTS();
++}

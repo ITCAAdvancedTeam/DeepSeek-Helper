@@ -1,0 +1,252 @@
+diff --git a/planning/speed_limit_tracker/BUILD b/planning/speed_limit_tracker/BUILD
+new file mode 100644
+index 000000000..a13effe63
+--- /dev/null
++++ b/planning/speed_limit_tracker/BUILD
+@@ -0,0 +1,18 @@
++cc_library(
++    name = "speed_limit_tracker",
++    srcs = glob(["src/**/*.cpp"]),
++    hdrs = glob(["include/**/*.h"]),
++    includes = [
++        "include",
++        "include/speed_limit_tracker",
++    ],
++    visibility = ["//visibility:public"],
++    deps = [
++        "//common/utils_constants",
++        "//common/utils_geometric",
++        "//mapping/maps:map_utils",
++        "//planning/lane_map_server",
++        "//planning/planning_common",
++        "//planning/terminal_state_machine",
++    ],
++)
+diff --git a/planning/speed_limit_tracker/CMakeLists.txt b/planning/speed_limit_tracker/CMakeLists.txt
+new file mode 100644
+index 000000000..5b1ae9fca
+--- /dev/null
++++ b/planning/speed_limit_tracker/CMakeLists.txt
+@@ -0,0 +1,48 @@
++cmake_minimum_required(VERSION 3.0.2)
++project(speed_limit_tracker)
++
++###########
++## Build ##
++###########
++
++set(CATKIN_COMPONENTS
++  maps
++  lane_map_server
++  planning_common
++  terminal_state_machine
++  utils_constants
++  utils_geometric
++  )
++
++find_package(catkin REQUIRED COMPONENTS ${CATKIN_COMPONENTS})
++find_package(Boost REQUIRED)
++
++catkin_package(
++  INCLUDE_DIRS include
++  LIBRARIES speed_limit_tracker
++  CATKIN_DEPENDS ${CATKIN_COMPONENTS}
++  )
++
++add_library(speed_limit_tracker
++  src/speed_limit_tracker.cpp
++  )
++
++target_include_directories(speed_limit_tracker
++  PUBLIC
++  include
++  PRIVATE SYSTEM
++  ${catkin_INCLUDE_DIRS}
++  )
++
++target_link_libraries(speed_limit_tracker
++    ${catkin_LIBRARIES}
++  )
++
++#############
++## Install ##
++#############
++install(DIRECTORY include/${PROJECT_NAME}/
++  DESTINATION ${CATKIN_PACKAGE_INCLUDE_DESTINATION}
++  FILES_MATCHING PATTERN "*.h"
++  PATTERN ".svn" EXCLUDE
++  )
+diff --git a/planning/speed_limit_tracker/include/speed_limit_tracker/speed_limit_tracker.h b/planning/speed_limit_tracker/include/speed_limit_tracker/speed_limit_tracker.h
+new file mode 100644
+index 000000000..8b14dd91e
+--- /dev/null
++++ b/planning/speed_limit_tracker/include/speed_limit_tracker/speed_limit_tracker.h
+@@ -0,0 +1,34 @@
++#pragma once
++
++#include <lane_map_server/mappery/mappery.h>
++#include <planning_common/types/ego_object.h>
++#include <planning_common/types/predicted_object.h>
++#include <planning_common/types/predicted_scene.h>
++#include <terminal_state_machine/terminal_state_machine.h>
++
++#include <optional>
++#include <unordered_map>
++
++
++namespace planning {
++
++class SpeedLimitTracker
++{
++ public:
++  SpeedLimitTracker() : last_dynamic_speed_limit_(100.0)
++  {
++  }
++
++  const PredictedScene::DesiredSpeedLimit
++  getDesiredSpeedLimit(const perception_msgs::Scene& scene_msg, const Mappery& map,
++                       const std::unordered_map<ObjectID, PredictedObject>& predicted_objects, const EgoObject& ego,
++                       const terminal_sm::TerminalStateMachine& terminal_state_machine,
++                       const double desired_speed_above_road_limit, const double terminal_parking_speed_limit);
++
++ private:
++  double last_dynamic_speed_limit_;
++
++  std::optional<double> updateSpeedLimitSign(const std::unordered_map<ObjectID, PredictedObject>& predicted_objects,
++                                             const EgoObject& ego, const Mappery& map);
++};
++} // namespace planning
+diff --git a/planning/speed_limit_tracker/package.xml b/planning/speed_limit_tracker/package.xml
+new file mode 100644
+index 000000000..298621d57
+--- /dev/null
++++ b/planning/speed_limit_tracker/package.xml
+@@ -0,0 +1,15 @@
++<?xml version="1.0"?>
++<package format="2">
++    <name>speed_limit_tracker</name>
++    <version>0.0.0</version>
++    <description>Speed Limit Tracker</description>
++    <maintainer email="ishaan@applied.co">Ishaan Narain</maintainer>
++    <license>TODO</license>
++    <buildtool_depend>catkin</buildtool_depend>
++    <depend>lane_map_server</depend>
++    <depend>maps</depend>
++    <depend>planning_common</depend>
++    <depend>terminal_state_machine</depend>
++    <depend>utils_constants</depend>
++    <depend>utils_geometric</depend>
++</package>
+diff --git a/planning/speed_limit_tracker/src/speed_limit_tracker.cpp b/planning/speed_limit_tracker/src/speed_limit_tracker.cpp
+new file mode 100644
+index 000000000..a436e12a0
+--- /dev/null
++++ b/planning/speed_limit_tracker/src/speed_limit_tracker.cpp
+@@ -0,0 +1,107 @@
++#include "speed_limit_tracker/speed_limit_tracker.h"
++
++#include "utils/constants/constants.h"
++#include "utils/geometric/utils.h"
++
++namespace planning {
++
++namespace {
++constexpr double kMaxDistanceFromLaneToSpeedLimitSign = 2.0; // meters
++constexpr double kDesiredSpeedToSpeedLimitRatio = 0.97;      // target 97% of speed limit
++
++/// Returns the desired speed limit as specified in the map. This is could be different from the posted speed limit.
++/// Converts the speed to meters per second, from mph in the map, before returning
++std::optional<double> desiredSpeedFromMap(const Mappery& map)
++{
++  const lane_map::LaneRef* ego_lr = map.getEgoLaneRef();
++  if (ego_lr == nullptr)
++    return std::nullopt;
++  const lane_map::LaneGroup* ego_lg = map.getMap().getLaneGroup(ego_lr->getLaneGroupRef());
++  if (ego_lg == nullptr)
++    return std::nullopt;
++  if (ego_lg->desired_speed_mph <= 0.0) {
++    return std::nullopt;
++  }
++  return ego_lg->desired_speed_mph * ::constants::MPH_TO_M_S;
++}
++} // namespace
++
++const PredictedScene::DesiredSpeedLimit SpeedLimitTracker::getDesiredSpeedLimit(
++    const perception_msgs::Scene& scene_msg, const Mappery& map,
++    const std::unordered_map<ObjectID, PredictedObject>& predicted_objects, const EgoObject& ego,
++    const terminal_sm::TerminalStateMachine& terminal_state_machine, const double desired_speed_above_road_limit,
++    const double terminal_parking_speed_limit)
++{
++  std::optional<double> dynamic_speed_limit = updateSpeedLimitSign(predicted_objects, ego, map);
++  std::optional<double> map_desired_speed = desiredSpeedFromMap(map);
++  const double route_speed = scene_msg.route_velocity.desired_velocity;
++
++  const bool parking_unparking_in_progress =
++      terminal_state_machine.CurrentStateID() == terminal_sm::TerminalStateMachine::StateIndex::PARK ||
++      terminal_state_machine.CurrentStateID() == terminal_sm::TerminalStateMachine::StateIndex::UNPARK;
++  const bool should_stop = terminal_state_machine.ShouldDecelerateToStop();
++
++  const bool is_user_override = scene_msg.route_velocity.source == planning_msgs::VelocityRequest::USER_CONTROL ||
++                                scene_msg.route_velocity.source == planning_msgs::VelocityRequest::OPERATOR_INTERFACE ||
++                                scene_msg.route_velocity.source == planning_msgs::VelocityRequest::SCENE_SIMULATOR ||
++                                parking_unparking_in_progress || should_stop;
++
++  double desired_speed = route_speed;
++  if (should_stop) {
++    desired_speed = 0.0;
++  } else if (parking_unparking_in_progress) {
++    desired_speed = terminal_parking_speed_limit;
++  } else if (map_desired_speed.has_value() && !is_user_override) {
++    desired_speed = *map_desired_speed + desired_speed_above_road_limit;
++  }
++
++  if (dynamic_speed_limit.has_value()) {
++    last_dynamic_speed_limit_ = *dynamic_speed_limit;
++  }
++
++  desired_speed = std::min(desired_speed, last_dynamic_speed_limit_) * kDesiredSpeedToSpeedLimitRatio;
++
++  return PredictedScene::DesiredSpeedLimit({ .value = desired_speed, .is_user_override = is_user_override });
++}
++
++std::optional<double> SpeedLimitTracker::updateSpeedLimitSign(
++    const std::unordered_map<ObjectID, PredictedObject>& predicted_objects, const EgoObject& ego, const Mappery& map)
++{
++  const auto ego_path = map.getEgoPath();
++  const std::vector<geometry_msgs::Point>& left_shoulder_boundary =
++      map.getExtensionLaneGroupBoundary(ego_path, map_utils::Side::LEFT);
++  const std::vector<geometry_msgs::Point>& right_shoulder_boundary =
++      map.getExtensionLaneGroupBoundary(ego_path, map_utils::Side::RIGHT);
++
++  // Find all Objects that have type "SPEED_LIMIT_SIGN"
++  std::vector<PredictedObject> speed_limit_signs;
++  for (const auto& [_, pred_obj] : predicted_objects) {
++    if (pred_obj.getType() == ObjectType::SPEED_LIMIT_SIGN) {
++      // NOTE: We need to decide how to handle multiple signs. This probably has to be
++      // done using some form of tracking instead of the simple association mechanism used below.
++
++      // Check that the Sign is within the Boundaries of the Ego Lane
++      const double offset = geometric::pointOffsetFromLaneApproximate(
++          left_shoulder_boundary, right_shoulder_boundary,
++          planning_math::convertPointType<geometry_msgs::Point>(pred_obj.getCartesianState()));
++      if (offset > kMaxDistanceFromLaneToSpeedLimitSign) {
++        continue;
++      }
++      speed_limit_signs.push_back(pred_obj);
++    }
++  }
++
++  // If there are no Speed Limit Signs or there are multiple Speed Limit Signs, return nullopt
++  if (speed_limit_signs.empty()) {
++    return std::nullopt;
++  }
++
++  const auto maybe_speed_limit = speed_limit_signs.front().getSpeedLimit();
++  // TODO: Use CHECK instead of assert
++  assert(maybe_speed_limit.has_value());
++  const double dynamic_speed_limit = maybe_speed_limit.value();
++
++  return dynamic_speed_limit;
++}
++
++} // namespace planning
