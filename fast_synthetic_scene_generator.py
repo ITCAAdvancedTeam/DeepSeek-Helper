@@ -12,7 +12,7 @@ async def load_yaml(model_name, client, messages, yaml_file):
         print(f"⚠️ Error: YAML file '{yaml_file}' not found.")
         return
 
-    yaml_input = f"Here is an example of a scenario definition Yaml file {yaml_file} for autonomous driving simulation.\n Please understand the relation between description and the rest of the Yaml content \n\n{yaml_content}"
+    yaml_input = f"Here is an example of a scenario definition Yaml file {yaml_file} for autonomous driving simulation.\n Please understand the relation between description and the rest of the Yaml content. The example file is following: \n\n{yaml_content}"
     
     messages.append({"role": "user", "content": yaml_input})
     print("\n📥 Sending YAML file to DeepSeek...")
@@ -38,7 +38,7 @@ async def chat(model_name, client, messages):
             print("👋 Exiting chat. Goodbye!")
             break
         
-        requirement_input = "Please construct a yaml response based on the following scenario description.\n"
+        requirement_input = "Please construct a response based on the following scenario description and provide a yaml file style scenario definition as the example file.\n"
         messages.append({"role": "user", "content": requirement_input + user_input})
 
         print("DeepSeek: ", end='', flush=True)
