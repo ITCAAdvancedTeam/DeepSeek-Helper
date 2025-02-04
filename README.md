@@ -29,5 +29,21 @@ Provide code review feedback for pull requests and save time for human code revi
     python ai_code_reviewer.py --diff ./diff_files/common_utils_lane_map.diff --model deepseek-r1:1.5b
     ```
 
+## Audio interpreter
+### Description
+Provide a user-interface for generating ADK commands from natural language.
+
+### Run
+- Install dependencies
+    ```
+    pip3 install SpeechRecognition
+    pip3 install PyAudio
+    ```
+- Run
+    ```
+    python audio_interpreter.py --model deepseek-r1:1.5b --msg_file ./json_files/msg_cfg.json 
+    ```
+
+
 ## Other ollama python example
     https://github.com/ollama/ollama-python/tree/main
