@@ -11,7 +11,7 @@ Deploy DeepSeek model on local machine and use the pre-trained model for applica
     ollama run deepseek-r1:1.5b
     ```
 
-## Fast synthetic scen generator
+## 1. Fast synthetic scen generator
 ### Description
 Generate simulation scenario for autonomous driving ADK evaluation with the help of DeepSeek model. The input is a description in natural language and the output is a structured scenario definition, including ego behavior, actor behavior, and parameter range definition. This functionality can be served as a quick start of a sythetic scenario construction.
 
@@ -20,16 +20,16 @@ Generate simulation scenario for autonomous driving ADK evaluation with the help
     python3 fast_synthetic_scene_generator.py --model deepseek-r1:1.5b --yaml ./yaml_files/cut-in_passenger-vehicle_decel.scn.yaml
     ```
 
-## Code reviewer for git difference file
+## 2. Code reviewer for git difference file
 ### Description
-Provide code review feedback for pull requests and save time for human code reviewer by filtering out unimportant code update.
+Provide code review feedback for pull requests and save time for human pr reviewer by filtering out unimportant code update.
 
 ### Run
     ```
-    python ai_code_reviewer.py --diff ./diff_files/common_utils_lane_map.diff --model deepseek-r1:1.5b
+    python3 pr_reviewer.py --model deepseek-r1:1.5b --diff ./diff_files/common_utils_lane_map.diff
     ```
 
-## Audio interpreter
+## 3. Voice assistant
 ### Description
 Provide a user-interface for generating ADK commands from natural language.
 
@@ -39,10 +39,22 @@ Provide a user-interface for generating ADK commands from natural language.
     pip3 install SpeechRecognition
     pip3 install PyAudio
     ```
-- Run
+- Run ROS2 node (arguments are optional)
     ```
-    python audio_interpreter.py --model deepseek-r1:1.5b --msg_file ./json_files/msg_cfg.json 
+    python3 voice_assistant.py --model deepseek-r1:1.5b --msg_file ./json_files/ego_command.json 
     ```
+
+## 4. Traffic regulation text inteerpreter
+### Description
+Provide a user-interface for generating ADK commands from natural language.
+
+### Run
+- Run ROS2 node (arguments are optional)
+    ```
+    python3 regulation_interpreter.py --model deepseek-r1:1.5b --cfg_file ./json_files/traffic_signs.json
+    ```
+- Publishing Test Messages to "/traffic_sign_text"
+    ros2 topic pub /traffic_sign_text std_msgs/msg/String "{data: 'Speed Limit 70 mph'}"
 
 
 ## Other ollama python example

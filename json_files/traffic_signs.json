@@ -1,0 +1,67 @@
+{
+    "speed_limit": {
+        "description": "Indicates the maximum speed limit allowed on the road. Examples: 'Speed Limit 25 mph', 'Maximum Speed 55', 'Min Speed 40', 'Speed Limit 70 km/h'.",
+        "ros2_message_type": "std_msgs/msg/Float32",
+        "unit": "m/s"
+    },
+    "weight_limit": {
+        "description": "Specifies the maximum weight allowed for vehicles on a certain road or bridge. Examples: 'Weight Limit 10 Tons', 'No Vehicles Over 5,000 lbs', 'Bridge Limit 8 Tons'.",
+        "ros2_message_type": "std_msgs/msg/Float32",
+        "unit": "kg"
+    },
+    "height_limit": {
+        "description": "Warns drivers about height restrictions for tunnels, bridges, or overpasses. Examples: 'Low Clearance 12' 6\"', 'No Vehicles Over 10 ft Tall', 'Max Height 4m'.",
+        "ros2_message_type": "std_msgs/msg/Float32",
+        "unit": "m"
+    },
+    "lane_control": {
+        "description": "Governs how lanes should be used and which directions are allowed. Examples: 'Left Lane Must Turn Left', 'Right Lane Must Turn Right', 'Merge Left', 'HOV Lane Only', 'Trucks Right Lane Only'.",
+        "ros2_message_type": "std_msgs/msg/String",
+        "unit": "none"
+    },
+    "turn_restriction": {
+        "description": "Restricts turning movements at intersections. Examples: 'No U-Turn', 'No Left Turn', 'No Right Turn', 'Left Turn Yield on Green'.",
+        "ros2_message_type": "std_msgs/msg/Bool",
+        "unit": "none"
+    },
+    "stop_yield": {
+        "description": "Regulates right-of-way and stopping behavior at intersections. Examples: 'STOP', 'YIELD', 'All-Way Stop', 'Yield to Pedestrians'.",
+        "ros2_message_type": "std_msgs/msg/Bool",
+        "unit": "none"
+    },
+    "parking_rules": {
+        "description": "Indicates parking restrictions and permitted parking zones. Examples: 'No Parking', 'No Parking Anytime', 'Handicap Parking Only', '15-Minute Parking'.",
+        "ros2_message_type": "std_msgs/msg/String",
+        "unit": "none"
+    },
+    "pedestrian_control": {
+        "description": "Controls pedestrian and bicycle traffic at intersections. Examples: 'Stop Here on Red', 'Pedestrian Crossing', 'Wait for Green', 'Push Button for Walk Signal'.",
+        "ros2_message_type": "std_msgs/msg/Bool",
+        "unit": "none"
+    },
+    "highway_exit": {
+        "description": "Provides information about highway exits and upcoming road changes. Examples: 'Exit 45', 'Next Exit 2 Miles', 'Rest Area 1 Mile', 'Gas - Food - Lodging Next Right'.",
+        "ros2_message_type": "std_msgs/msg/String",
+        "unit": "none"
+    },
+    "hazard_warning": {
+        "description": "Warns drivers of hazardous road conditions ahead. Examples: 'Slippery When Wet', 'Bridge May Ice in Winter', 'Steep Hill Ahead', 'Falling Rocks'.",
+        "ros2_message_type": "std_msgs/msg/String",
+        "unit": "none"
+    },
+    "construction_zone": {
+        "description": "Notifies drivers of roadwork and potential delays. Examples: 'Road Work Ahead', 'Detour', 'Lane Closed', 'Expect Delays'.",
+        "ros2_message_type": "std_msgs/msg/String",
+        "unit": "none"
+    },
+    "special_vehicle_rules": {
+        "description": "Applies to certain vehicle types such as trucks and hazardous materials. Examples: 'Trucks Use Low Gear', 'No Hazardous Materials', 'Snow Chains Required', 'Weigh Station Ahead'.",
+        "ros2_message_type": "std_msgs/msg/String",
+        "unit": "none"
+    },
+    "custom_signs": {
+        "description": "Special or localized road signs for safety or regulations. Examples: 'Local Traffic Only', 'Deaf Child Area', 'Speed Bumps Ahead', 'Tsunami Evacuation Route'.",
+        "ros2_message_type": "std_msgs/msg/String",
+        "unit": "none"
+    }
+}

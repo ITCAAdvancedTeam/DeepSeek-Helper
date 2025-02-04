@@ -7,7 +7,7 @@ from rclpy.node import Node
 from std_msgs.msg import Float32, Bool
 from ollama import AsyncClient
 
-class InterpreterNode(Node):
+class AssistantNode(Node):
     def __init__(self, model_name, msg_file):
         super().__init__('ros2_publisher')
         self.client = AsyncClient()
@@ -134,11 +134,11 @@ class InterpreterNode(Node):
 async def main():
     parser = argparse.ArgumentParser(description="ROS2 Command-Line Interpreter with ROS2 Publishing")
     parser.add_argument("--model", type=str, default="deepseek-r1:1.5b", help="Specify the DeepSeek model (default: deepseek-r1:1.5b)")
-    parser.add_argument("--msg_file", type=str, default="ros2_messages.json", help="Path to the ROS2 messages JSON file")
+    parser.add_argument("--msg_file", type=str, default="./json_files/ego_command.json", help="Path to the ROS2 messages JSON file")
 
     args = parser.parse_args()
     rclpy.init()
-    node = InterpreterNode(args.model, args.msg_file)
+    node = AssistantNode(args.model, args.msg_file)
 
     while True:
         user_input = input("\n📝 Enter a command (or type 'exit' to quit): ")
