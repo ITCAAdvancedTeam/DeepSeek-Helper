@@ -11,6 +11,7 @@ Deploy the DeepSeek model on a local machine and utilize the pre-trained model f
     ```sh
     ollama run deepseek-r1:1.5b
     ```
+    Select models from [Ollama DeepSeek Models](https://ollama.com/library/deepseek-r1:1.5b)
 
 ---
 
@@ -26,9 +27,9 @@ Generate simulation scenarios for autonomous driving **ADK evaluation** using th
 This functionality serves as a **quick-start tool** for synthetic scenario construction.
 
 ### Run
-    ```sh
-    python3 fast_synthetic_scene_generator.py --model deepseek-r1:1.5b --yaml ./yaml_files/cut-in_passenger-vehicle_decel.scn.yaml
-    ```
+```sh
+python3 fast_synthetic_scene_generator.py --model deepseek-r1:1.5b --yaml ./yaml_files/cut-in_passenger-vehicle_decel.scn.yaml
+```
 
 ## 2. Code Reviewer for Git Difference File
 ### Description
@@ -39,9 +40,9 @@ Automates **code review feedback** for pull requests, reducing the workload of h
 This tool streamlines the **pull request (PR) review process**, making it more efficient and focused.
 
 ### Run
-    ```sh
-    python3 pr_reviewer.py --model deepseek-r1:1.5b --diff ./diff_files/common_utils_lane_map.diff
-    ```
+```sh
+python3 pr_reviewer.py --model deepseek-r1:1.5b --diff ./diff_files/common_utils_lane_map.diff
+```
 
 ## 3. Voice Assistant
 ### Description
