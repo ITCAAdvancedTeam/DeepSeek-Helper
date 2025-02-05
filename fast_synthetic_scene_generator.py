@@ -46,7 +46,7 @@ async def chat(model_name, client, messages):
         requirement_input = (
             "Please construct a response based on the following scenario description and provide a yaml file style scenario definition as THE EXAMPL YAML file in the first chat.\n"
             "Given the following scenario description:\n\n"
-            "\"{user_input}\""
+            f"\"{user_input}\"\n"
             "Return the YAML definition based on this description. The YAML should include:\n"
             "- Metadata (name, version, description, tags)\n"
             "- Scenario taxonomy (including Dynamic Driving Tasks, Road Level, Lane Geometry, etc.)\n"
