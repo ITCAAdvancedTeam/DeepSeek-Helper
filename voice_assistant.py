@@ -78,32 +78,65 @@ class AssistantNode(Node):
         self.get_logger().info(f"🔍 Matched ROS2 Message: {key_response}")
 
         # Step 2: AI Determines the Value (With Correct Unit)
-        messages = [
-            {
-                "role": "user",
-                "content": (
-                    f"Extract the numerical value from this command:\n\n"
-                    f"Command: \"{text}\"\n"
-                    f"ROS2 Message: \"{key_response}\" ({self.ros2_messages[key_response]['description']})\n"
-                    f"Expected Unit: \"{self.ros2_messages[key_response]['unit']}\"\n\n"
-                    f"Return only the extracted value in the correct unit, formatted like this:\n"
-                    f"VALUE (without any additional text)."
-                )
-            }
-        ]
-        value_response = ""
+        if self.ros2_messages[key_response]['ros2_message_type'] == "std_msgs/msg/Float32":
+            # Separate message format for Float32
+            messages = [
+                {
+                    "role": "user",
+                    "content": (
+                        f"Extract the numerical value from this command:\n\n"
+                        f"Command: \"{text}\"\n"
+                        f"ROS2 Message: \"{key_response}\" ({self.ros2_messages[key_response]['description']})\n"
+                        f"Expected Unit: \"{self.ros2_messages[key_response]['unit']}\"\n\n"
+                        f"Extract the numerical value from the command, and convert it into the expected unit if applicable. "
+                        f"Return **only** the numerical value, **without any additional text or units**, formatted like this:\n"
+                        f"VALUE"
+                    )
+                }
+            ]
+            # Synchronous request to get the value for Float32
+            value_response = self.client.chat(model=self.model_name, messages=messages)
+            value_response = value_response['message']['content'].strip()
 
-        async for part in (await self.client.chat(model=self.model_name, messages=messages, stream=True)):
-            value_response += part['message']['content'].strip()
+        elif self.ros2_messages[key_response]['ros2_message_type'] == "std_msgs/msg/Bool":
+            # Separate message format for Bool
+            messages = [
+                {
+                    "role": "user",
+                    "content": (
+                        f"Extract the boolean value from this command:\n\n"
+                        f"Command: \"{text}\"\n"
+                        f"ROS2 Message: \"{key_response}\" ({self.ros2_messages[key_response]['description']})\n"
+                        f"Determine the value by comparing with the positive or negative expression of the key. "
+                        f"Return 1 if it is true and 0 if it is false, formatted like this:\n"
+                        f"VALUE"
+                    )
+                }
+            ]
+            # Synchronous request to get the value for Bool
+            value_response = self.client.chat(model=self.model_name, messages=messages)
+            value_response = value_response['message']['content'].strip()
+        else:
+            # Default handling (if any)
+            value_response = text
 
-        # Validate extracted value
-        extracted_value = self.parse_value(value_response, key_response)
+        try:
+            self.get_logger().info(f"value_response: {value_response}")
+
+            # Extract the value based on the ROS2 message type
+            extracted_value = self.parse_value(value_response, key_response)
+
+        except KeyError as e:
+            self.get_logger().error(f"⚠️ Error in processing value response: {e}")
+            return None, None
+
+        self.get_logger().info(f"🔍 Extract value: {extracted_value}")
 
         return key_response, extracted_value
 
     def parse_value(self, value_response, key_response):
         """Ensure AI response is properly formatted."""
-        msg_type = self.ros2_messages[key_response]["message_type"]
+        msg_type = self.ros2_messages[key_response]["ros2_message_type"]
 
         if msg_type == "std_msgs/msg/Bool":
             return value_response.lower() in ["true", "1", "yes"]
@@ -124,7 +157,7 @@ class AssistantNode(Node):
             self.get_logger().info(f"\n✅ Publishing to {topic}: {extracted_value} {self.ros2_messages[msg_type]['unit']}")
 
             # Publish to ROS2 topic
-            msg = Float32() if self.ros2_messages[msg_type]["message_type"] == "std_msgs/msg/Float32" else Bool()
+            msg = Float32() if self.ros2_messages[msg_type]["ros2_message_type"] == "std_msgs/msg/Float32" else Bool()
             msg.data = extracted_value
             self.publishers[msg_type].publish(msg)
 

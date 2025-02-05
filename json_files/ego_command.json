@@ -1,47 +1,47 @@
 {
     "ego_vehicle_speed": {
         "description": "Set a target speed of the autonomous vehicle",
-        "message_type": "std_msgs/msg/Float32",
+        "ros2_message_type": "std_msgs/msg/Float32",
         "unit": "m/s"
     },
     "ego_vehicle_acceleration": {
         "description": "Control the acceleration of the vehicle",
-        "message_type": "std_msgs/msg/Float32",
+        "ros2_message_type": "std_msgs/msg/Float32",
         "unit": "m/s^2"
     },
     "ego_vehicle_deceleration": {
         "description": "Control the deceleration of the vehicle",
-        "message_type": "std_msgs/msg/Float32",
+        "ros2_message_type": "std_msgs/msg/Float32",
         "unit": "m/s^2"
     },
     "left_lane_change": {
         "description": "Make a lane change behavior to the left adjacent lane",
-        "message_type": "std_msgs/msg/Bool",
+        "ros2_message_type": "std_msgs/msg/Bool",
         "unit": "none"
     },
     "right_lane_change": {
         "description": "Make a lane change behavior to the right adjacent lane",
-        "message_type": "std_msgs/msg/Bool",
+        "ros2_message_type": "std_msgs/msg/Bool",
         "unit": "none"
     },
     "abort_lane_change": {
         "description": "Cancel a lane change behavior",
-        "message_type": "std_msgs/msg/Bool",
+        "ros2_message_type": "std_msgs/msg/Bool",
         "unit": "none"
     },
     "emergent_stop": {
         "description": "Make an emergent stop",
-        "message_type": "std_msgs/msg/Bool",
+        "ros2_message_type": "std_msgs/msg/Bool",
         "unit": "none"
     },
     "recalculate_route": {
         "description": "Cancel the planned route and calculate a new route based on new situations",
-        "message_type": "std_msgs/msg/Bool",
+        "ros2_message_type": "std_msgs/msg/Bool",
         "unit": "none"
     },
     "manual_drive": {
         "description": "Disable the controller to allow manual driving",
-        "message_type": "std_msgs/msg/Bool",
+        "ros2_message_type": "std_msgs/msg/Bool",
         "unit": "none"
     }
 }
