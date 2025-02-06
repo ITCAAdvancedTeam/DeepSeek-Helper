@@ -20,12 +20,12 @@
         "unit": "none"
     },
     "turn_restriction": {
-        "description": "Restricts turning movements at intersections. Examples: 'No U-Turn', 'No Left Turn', 'No Right Turn', 'Left Turn Yield on Green'.",
+        "description": "Restricts turning movements at intersections. Examples: 'No U-Turn', 'No Left Turn', 'No Right Turn', 'Left Turn Yield on Green', 'No Turn on Red', 'Right Lane Must Turn Right'.",
         "ros2_message_type": "std_msgs/msg/Bool",
         "unit": "none"
     },
     "stop_yield": {
-        "description": "Regulates right-of-way and stopping behavior at intersections. Examples: 'STOP', 'YIELD', 'All-Way Stop', 'Yield to Pedestrians'.",
+        "description": "Regulates right-of-way and stopping behavior at intersections. Examples: 'STOP', 'YIELD', 'All-Way Stop', 'Yield to Pedestrians', 'Wrong Way', 'Do Not Enter'.",
         "ros2_message_type": "std_msgs/msg/Bool",
         "unit": "none"
     },
@@ -51,6 +51,11 @@
     },
     "construction_zone": {
         "description": "Notifies drivers of roadwork and potential delays. Examples: 'Road Work Ahead', 'Detour', 'Lane Closed', 'Expect Delays'.",
+        "ros2_message_type": "std_msgs/msg/String",
+        "unit": "none"
+    },
+    "school_zone": {
+        "description": "Notifies drivers of entering an area near school where drivers should significantly reduce the speed and be extra cautious as children may be present crossing the street. Examples: 'School Crossing', 'Slow School Zone', 'Watch Out For Children'.",
         "ros2_message_type": "std_msgs/msg/String",
         "unit": "none"
     },
