@@ -68,8 +68,9 @@ class TrafficSignInterpreter(Node):
                     f"Command: \"{text}\"\n\n"
                     f"Match it to the best ROS2 message category from this list:\n"
                     f"{json.dumps({key: value['description'] for key, value in self.ros2_messages.items()}, indent=2)}\n\n"
-                    f"Return only the exact key (e.g., 'speed_limit') without extra text, formatted like this:\n"
-                    f"KEY"
+                    f"Return the best-matched key (e.g., speed_limit)"
+                    # f"Return the best-matched key (e.g., speed_limit) without extra text, formatted like this:\n"
+                    # f"KEY"
                 )
             }
         ]
@@ -157,6 +158,8 @@ class TrafficSignInterpreter(Node):
         # Iterate through the words from the end, searching for the last valid key
         for word in reversed(words):
             # Check if the word matches any key in ros2_messages
+            word = word.strip('"')
+            word = word.strip('*')
             if word in self.ros2_messages:
                 return word  # Return the first key found from the end
 
