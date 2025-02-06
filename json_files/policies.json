@@ -1,0 +1,74 @@
+{
+    "intersection": {
+        "description": "Approaching or navigating through an intersection where the ego vehicle must consider stop lines, traffic lights, pedestrian crossings, and other vehicles.",
+        "geometry": {
+            "num_road": 4
+        },
+        "traffic_rule": {
+            "has_stop_line": true,
+            "has_traffic_light": false,
+            "has_no_turn_on_red": false,
+            "has_pedestrian_crossing": true
+        },
+        "traffic_density": "low"
+    },
+    "roundabout": {
+        "description": "Navigating a circular intersection where vehicles must yield to traffic already in the roundabout before entering.",
+        "geometry": {
+            "num_entry_lanes": 2,
+            "num_exit_lanes": 2,
+            "central_island": true
+        },
+        "traffic_rule": {
+            "yield_to_inside_traffic": true,
+            "has_traffic_light": false
+        },
+        "traffic_density": "medium"
+    },
+    "multi_lane_driving": {
+        "description": "Ego is driving on a multi-laned road that allows lane changing, considering a switch to an adjacent lane based on safety, comfort, and efficiency.",
+        "geometry": {
+            "num_lanes": 3,
+            "road_type": "highway"
+        },
+        "traffic_rule": {
+            "speed_limit": 65,
+            "has_lane_markings": true
+        },
+        "traffic_density": "high"
+    },
+    "merging": {
+        "description": "Ego is driving on a merging lane which will end in a certain distance, considering merging into the target lane based on safety and comfort.",
+        "geometry": {
+            "num_lanes": 1,
+            "merge_distance": 200
+        },
+        "traffic_rule": {
+            "yield_to_main_lane": true
+        },
+        "traffic_density": "medium"
+    },
+    "cross_walk": {
+        "description": "Ego approaches a crosswalk where pedestrians may be present, requiring appropriate yielding behavior.",
+        "geometry": {
+            "crosswalk_width": 3,
+            "is_signalized": false
+        },
+        "traffic_rule": {
+            "must_yield_to_pedestrians": true
+        },
+        "traffic_density": "low"
+    },
+    "overtaking": {
+        "description": "Ego considers overtaking a slower vehicle while ensuring safety, legality, and efficiency.",
+        "geometry": {
+            "num_lanes": 2,
+            "is_passing_allowed": true
+        },
+        "traffic_rule": {
+            "check_oncoming_traffic": true,
+            "speed_limit": 55
+        },
+        "traffic_density": "medium"
+    }
+}
