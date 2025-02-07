@@ -2,27 +2,55 @@ import rclpy
 import json
 import os
 import argparse
+import easyocr
 from rclpy.node import Node
 from std_msgs.msg import String, Float32, Bool
+from sensor_msgs.msg import Image
+from cv_bridge import CvBridge
 from ollama import Client  # Assuming synchronous client
 
 class TrafficSignInterpreter(Node):
-    def __init__(self, model_name, cfg_file):
+    def __init__(self, model_name, cfg_file, img_file):
         super().__init__('traffic_sign_interpreter')
         self.client = Client()  # Synchronous client
         self.model_name = model_name
+
         self.ros2_messages = self.load_ros2_messages(cfg_file)
         self._publishers = self.create_publishers()  # Use _publishers instead of publishers
-
+        self.bridge = CvBridge()
         self.subscription = self.create_subscription(
-            String,
-            "/traffic_sign_text",
-            self.traffic_sign_callback,
+            Image,
+            "/traffic_sign_image",
+            self.image_callback,
             10
         )
+
+        # self.subscription = self.create_subscription(
+        #     String,
+        #     "/traffic_sign_text",
+        #     self.traffic_sign_callback,
+        #     10
+        # )
+
         self.get_logger().info(f"🚦 Traffic Sign Interpreter Node Started... Listening on /traffic_sign_text")
         self.get_logger().info(f"🧠 Using Model: {model_name}")
         self.get_logger().info(f"📂 Config File: {cfg_file}")
+
+    def extract_text_from_image(self, img_file):
+        """Extract text information from input image"""
+        # Create an OCR reader object
+        reader = easyocr.Reader(['en'])
+
+        # Read text from an image
+        result = reader.readtext(img_file)
+
+        # reconstruct the extracted text
+        text = ''
+        for detection in result:
+            text = text + detection[1] + '_'
+        text = text.rstrip('_')
+
+        return text
 
     def load_ros2_messages(self, cfg_file):
         """Load ROS2 messages from an external JSON file."""
@@ -241,11 +269,25 @@ class TrafficSignInterpreter(Node):
         # Synchronously process the traffic sign message
         self.process_traffic_sign(msg.data)
 
+    def image_callback(self, msg):
+        """ROS2 Subscription Callback for /traffic_sign_image."""
+        try:
+            cv_image = self.bridge.imgmsg_to_cv2(msg)
+        except CvBridgeError as e:
+            self.get_logger().error(e)
+
+        self.get_logger().info('Received traffic sign image')
+        text = self.extract_text_from_image(cv_image)
+        self.get_logger().info(f"📩 Extracted text: {text}")
+        self.process_traffic_sign(text)
+
+
 def main(args=None):
     """Main function to initialize ROS2 and parse arguments."""
     parser = argparse.ArgumentParser(description="Traffic Sign Interpreter Node")
     parser.add_argument("--model", type=str, default="deepseek-r1:1.5b", help="DeepSeek Model to use for interpretation")
     parser.add_argument("--cfg_file", type=str, default="./json_files/traffic_signs.json", help="Path to traffic sign configuration JSON file")
+    parser.add_argument("--img_file", type=str, default='./traffic_sign_images/speed_limit_70.jpg', help="Path to traffic sign images")
 
     args = parser.parse_args()
 
@@ -255,9 +297,11 @@ def main(args=None):
         rclpy_args.extend(["--model", args.model])
     if args.cfg_file:
         rclpy_args.extend(["--cfg_file", args.cfg_file])
+    if args.img_file:
+        rclpy_args.extend(["--img_file", args.img_file])
 
     rclpy.init(args=rclpy_args)
-    node = TrafficSignInterpreter(args.model, args.cfg_file)
+    node = TrafficSignInterpreter(args.model, args.cfg_file, args.img_file)
     
     try:
         rclpy.spin(node)  # Use standard spin to wait for ROS2 callbacks
