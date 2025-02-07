@@ -1,74 +1,61 @@
 {
     "intersection": {
-        "description": "Approaching or navigating through an intersection where the ego vehicle must consider stop lines, traffic lights, pedestrian crossings, and other vehicles.",
+        "description": "Ego vehicle is approaching or navigating a four-way intersection where it must decide whether to stop, yield, or proceed. It must account for traffic lights, stop signs, pedestrian crossings, and vehicles from multiple directions. Right-of-way rules, turn regulations, and potential congestion influence decision-making.",
         "geometry": {
             "num_road": 4
         },
         "traffic_rule": {
             "has_stop_line": true,
-            "has_traffic_light": false,
-            "has_no_turn_on_red": false,
-            "has_pedestrian_crossing": true
-        },
-        "traffic_density": "low"
-    },
-    "roundabout": {
-        "description": "Navigating a circular intersection where vehicles must yield to traffic already in the roundabout before entering.",
-        "geometry": {
-            "num_entry_lanes": 2,
-            "num_exit_lanes": 2,
-            "central_island": true
-        },
-        "traffic_rule": {
-            "yield_to_inside_traffic": true,
             "has_traffic_light": false
         },
-        "traffic_density": "medium"
+        "traffic_density": 0.5
+    },
+    "roundabout": {
+        "description": "Ego vehicle is entering or navigating a circular roundabout where it must yield to traffic already inside before merging. Vehicles move in a single direction around a central island, requiring smooth entry, lane discipline, and proper exit maneuvers. Speed adjustment and gap selection are critical.",
+        "geometry": {
+            "num_road": 3
+        },
+        "traffic_rule": {
+            "has_traffic_light": false
+        },
+        "traffic_density": 0.5
     },
     "multi_lane_driving": {
-        "description": "Ego is driving on a multi-laned road that allows lane changing, considering a switch to an adjacent lane based on safety, comfort, and efficiency.",
+        "description": "Ego vehicle is traveling on a multi-lane highway or arterial road where lane changes may be necessary. It must consider traffic conditions, lane markings, and vehicle speeds to optimize movement while maintaining safety and efficiency. The presence of solid or dashed lane markings affects overtaking and lane-changing decisions.",
         "geometry": {
-            "num_lanes": 3,
-            "road_type": "highway"
+            "num_lanes": 3
         },
         "traffic_rule": {
-            "speed_limit": 65,
-            "has_lane_markings": true
+            "is_left_solid": false,
+            "is_right_solid": true
         },
-        "traffic_density": "high"
+        "traffic_density": 0.5
     },
     "merging": {
-        "description": "Ego is driving on a merging lane which will end in a certain distance, considering merging into the target lane based on safety and comfort.",
-        "geometry": {
-            "num_lanes": 1,
-            "merge_distance": 200
-        },
+        "description": "Ego vehicle is on a merging lane or acceleration ramp that will end in a short distance, requiring a safe merge into the main traffic flow. It must assess surrounding vehicles, adjust speed accordingly, and find a safe gap. Vehicles on the main road may or may not yield, affecting merging difficulty.",
+        "geometry": {},
         "traffic_rule": {
-            "yield_to_main_lane": true
+            "has_stop_line": true
         },
-        "traffic_density": "medium"
+        "traffic_density": 0.5
     },
     "cross_walk": {
-        "description": "Ego approaches a crosswalk where pedestrians may be present, requiring appropriate yielding behavior.",
-        "geometry": {
-            "crosswalk_width": 3,
-            "is_signalized": false
-        },
+        "description": "Ego vehicle is approaching a pedestrian crosswalk where pedestrians may have the right-of-way. It must slow down, scan for pedestrians, and determine whether to yield or stop. Visibility, pedestrian behavior, and road regulations influence decision-making, especially in areas with high foot traffic.",
+        "geometry": {},
         "traffic_rule": {
-            "must_yield_to_pedestrians": true
+            "has_crossing_light": false
+
         },
-        "traffic_density": "low"
+        "traffic_density": 0.5
     },
     "overtaking": {
-        "description": "Ego considers overtaking a slower vehicle while ensuring safety, legality, and efficiency.",
-        "geometry": {
-            "num_lanes": 2,
-            "is_passing_allowed": true
-        },
+        "description": "Ego vehicle is considering overtaking a slower vehicle on a multi-lane road or undivided highway. The decision requires checking for oncoming traffic, evaluating speed differentials, and ensuring compliance with road markings. Some sections may have solid lines or restricted zones that prohibit overtaking.",
+        "geometry": {},
         "traffic_rule": {
-            "check_oncoming_traffic": true,
-            "speed_limit": 55
+            "is_left_solid": false,
+            "is_right_solid": true,
+            "overtaking_allowed": true
         },
-        "traffic_density": "medium"
+        "traffic_density": 0.5
     }
 }
