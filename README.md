@@ -79,6 +79,10 @@ This tool ensures that **autonomous driving systems** correctly interpret and ad
     ```sh
     ros2 topic pub /traffic_sign_text std_msgs/msg/String "{data: 'Speed Limit 70 mph'}"
     ```
+- **Publish image messages to `/traffic_sign_image`:**
+    ```sh
+    python3 traffic_sign_image_publisher.py --img_file ./traffic_sign_images/speed_limit_70.jpg
+    ```
 
 ## Other Ollama Python Examples
 Here are some examples of calling Ollama models using the Ollama Python library:  
