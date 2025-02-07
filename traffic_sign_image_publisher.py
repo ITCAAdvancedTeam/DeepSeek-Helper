@@ -45,7 +45,7 @@ class ImagePublisher(Node):
 def main(args=None):
 
     parser = argparse.ArgumentParser(description="Traffic Sign Image Publisher Node")
-    parser.add_argument("--img_file", type=str, default='./traffic_sign_images/speed_limit_70.jpg', help="Path to traffic sign images")
+    parser.add_argument("--img_file", type=str, default='./traffic_sign_images/no_turn_on_red.png', help="Path to traffic sign images")
 
     args = parser.parse_args()
     rclpy_args = []
