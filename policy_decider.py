@@ -25,7 +25,7 @@ async def extract_key_from_response(response_text, scenarios_json):
 
         # If the word is a valid key in scenarios_json, return it
         if word in scenarios_json:
-            print(f"✅ Matched Key Found: {word}")
+            # print(f"✅ Matched Key Found: {word}")
             return word
 
     # If no valid key is found, print an error and return None
