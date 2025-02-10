@@ -1921,4 +1921,185 @@
         ```
 - **Description**: `terminal_state_machine_` is updated in `evaluateTerminalState` function and the `terminal_planner_` is called in `runPlanningCycle` function in `Planner` class.
 
-### 62. 
+---
+
+### 62. `planning::PredictedSceneBuilder`
+
+- **Brief:** Modify `buildPredictedScene` function by adding two more input parameters: `terminal_state_machine` and `terminal_stop_go_state_machine`.
+- **Location:**
+    - `/planning/predicted_scene_builder/include/predicted_scene_builder/predicted_scene_builder.h`
+- **Code:**
+    ```cpp
+    /**
+    * @brief Build the predicted scene
+    * @param scene_msg                      Perception scene (objects, ego state, etc.)
+    * @param map                            Mappery (lane graph & geometry)
+    * @param lane_id_tracker                Object responsible for keeping lane IDs consistent frame-to-frame
+    * @param terminal_state_machine         State machine that determines if terminal planning should be active
+    * @param terminal_stop_go_state_machine State machine that determines if ego should stop or go at terminal stop lines
+    * @param options                        Config for building the scene
+    * @return                               A fully constructed PredictedScene
+    */
+    std::unique_ptr<planning::PredictedScene>
+    buildPredictedScene(const perception_msgs::Scene& scene_msg, std::unique_ptr<const Mappery>&& map,
+                        const LaneIDTracker& lane_id_tracker, SpeedLimitTracker& speed_limit_tracker,
+                        const terminal_sm::TerminalStateMachine& terminal_state_machine,
+                        const terminal_stop_go_sm::TerminalStopGoStateMachine& terminal_stop_go_state_machine,
+                        SceneOptions options = SceneOptions());
+    ```
+- **Description**: Add `terminal_state_machine` into the scene here.
+
+---
+
+### 63. `PlannerRunBuildScene::buildScene`
+
+- **Brief:** Update the `buildScene` function to instantiate `SpeedLimitTracker`, `terminal_state_machine`, and `terminal_stop_go_state_machine` before passing them as arguments to `buildPredictedScene`.
+- **Location:**
+    - `/planning/predicted_scene_builder/src/planner_run_build_scene.cpp`
+- **Code:**
+    ```cpp
+    void PlannerRunBuildScene::buildScene()
+    {
+      scene_builder_ = std::make_shared<PredictedSceneBuilder>();
+      SpeedLimitTracker speed_limit_tracker;
+      auto terminal_state_machine =
+          terminal_sm::TerminalStateMachine(std::vector<terminal_sm::Waypoint>{}, terminal_sm::TerminalState{});
+      auto terminal_stop_go_state_machine = terminal_stop_go_sm::TerminalStopGoStateMachine(
+          std::vector<terminal_stop_go_sm::Waypoint>{}, terminal_stop_go_sm::TerminalState{});
+      scene_ = scene_builder_->buildPredictedScene(scene_msg_, std::move(mappery_), lane_id_tracker_, speed_limit_tracker,
+                                                   terminal_state_machine, terminal_stop_go_state_machine);
+    }
+    ```
+- **Description:** This change introduces the creation of instances for `SpeedLimitTracker`, `terminal_state_machine`, and `terminal_stop_go_state_machine`, which are then passed to the updated `buildPredictedScene` function.
+
+---
+
+### 64. `PredictedSceneBuilder` - `predicted_scene_builder.cpp`
+
+- **Brief:** Multiple changes related to adding new objects, constants, and modifying functions, such as updating the `buildPredictedScene` function to support additional parameters, and adding logic for stop lines and terminal maps.
+- **Location:**
+    - `/planning/predicted_scene_builder/src/predicted_scene_builder.cpp`
+  
+- **Code Block 1**: New includes and constants
+    ```cpp
+    #include <geometry_msgs/Point32.h>
+    #include "planning_common/utils/reference_line_utils.h"
+    #include "terminal_map_server/terminal_mappery/terminal_mappery.h"
+
+    // Threshold for the time (seconds) it takes for ego to reach next stop line
+    constexpr double STOP_LINE_TIME_THRESHOLD = 6.0;
+    // Threshold for the distance (meters) to the next stop line
+    constexpr double STOP_LINE_DISTANCE_THRESHOLD = 20.0;
+    ```
+- **Code Block 2**: New function `getStaticObjectBoundaries`
+    ```cpp
+    using StaticObjectBoundaries = std::unordered_map<ObjectID, std::pair<Eigen::Vector2d, perception_msgs::HullInfo>>;
+    StaticObjectBoundaries getStaticObjectBoundaries(const std::unordered_map<ObjectID, PredictedObject>& predicted_objects)
+    {
+    StaticObjectBoundaries static_obstacle_boundaries;
+    for (const auto& [obj_id, pred_obj] : predicted_objects) {
+        if (pred_obj.isObjectStatic()) {
+        Eigen::Vector2d centerpoint(pred_obj.getCartesianState().x, pred_obj.getCartesianState().y);
+        static_obstacle_boundaries[obj_id] = std::make_pair(centerpoint, pred_obj.getConvexHull());
+        }
+    }
+    return static_obstacle_boundaries;
+    }
+    ```
+- **Code Block 3**: New function `convertStopLineToSceneObject`
+    ```cpp
+    perception_msgs::Object convertStopLineToSceneObject(const perception_msgs::MapWaypoint& waypoint,
+                                                        const perception_msgs::EgoState& ego_state)
+    {
+    // Code for converting stop line waypoint to a scene object
+    }
+    ```
+- **Code Block 4**: Modifying `buildPredictedScene` function
+    ```cpp
+        std::unique_ptr<planning::PredictedScene> PredictedSceneBuilder::buildPredictedScene(
+        const perception_msgs::Scene& scene_msg, std::unique_ptr<const Mappery>&& map, const LaneIDTracker& lane_id_tracker,
+        SpeedLimitTracker& speed_limit_tracker, const terminal_sm::TerminalStateMachine& terminal_state_machine,
+        const terminal_stop_go_sm::TerminalStopGoStateMachine& terminal_stop_go_state_machine, SceneOptions options)
+    {
+    // Modifications to buildPredictedScene to incorporate speed limit tracking, terminal state machine, and stop line objects
+    }
+
+    ```
+
+- **Code Block 5**: Updates for predicted objects
+    ```cpp
+    // Check for any Construction or Debris Objects in Scene
+    bool out_of_odd_obj_detected = false;
+    for (const perception_msgs::Object& object : scene_msg.objects) {
+        PredictedObject predicted_obj(object, ego_object.getCartesianState(), ego_object.getYawRate());
+        // Additional checks for debris objects
+        predicted_objects.emplace(id, std::move(predicted_obj));
+        objects_observed_by_camera.emplace(id, object.was_observed_by_camera);
+        }
+        ```
+    - **Code Block 6**: Changes for stop line processing
+        ```cpp
+        for (const perception_msgs::MapWaypoint& waypoint : scene_msg.route.waypoints) {
+    if (waypoint.waypoint_type == perception_msgs::MapWaypoint::WAYPOINT_STOP_LINE &&
+        waypoint.id == terminal_stop_go_state_machine.CurrentWaypointId()) {
+        // Logic for adding stop line object to predicted objects
+    }
+    }
+    ```
+- **Code Block 6**: Changes for stop line processing
+    ```cpp
+    for (const perception_msgs::MapWaypoint& waypoint : scene_msg.route.waypoints) {
+    if (waypoint.waypoint_type == perception_msgs::MapWaypoint::WAYPOINT_STOP_LINE &&
+        waypoint.id == terminal_stop_go_state_machine.CurrentWaypointId()) {
+        // Logic for adding stop line object to predicted objects
+    }
+    }
+    ```
+- **Code Block 7**: Creating and using the terminal map
+    ```cpp
+    // Create Terminal Map
+    std::unique_ptr<TerminalMappery> terminal_map = std::make_unique<TerminalMappery>(scene_msg.terminal_map);
+    terminal_map->loadStaticObjectsInTerminal(getStaticObjectBoundaries(predicted_objects));
+    ```
+
+- **Code Block 8**: Handling parking spot and unpark handoff pose
+    ```cpp
+    // Get parking spots for origin and destination, if they exist in current terminal
+    std::string parking_spot_id = "";
+    if (scene_msg.terminal_map.terminal_id == scene_msg.route.origin_parking_spot.terminal_id) {
+    parking_spot_id = scene_msg.route.origin_parking_spot.id;
+    }
+    // Get terminal unpark handoff point pose
+    std::optional<GCSLocation> terminal_unpark_handoff_pose = std::nullopt;
+    ```
+- **Code Block 9**: Adjustments to `buildPredictedScene` return statement
+    ```cpp
+    auto new_predicted_scene = std::make_unique<PredictedScene>(
+        scene_msg.header, ego_location, std::move(map), std::move(ego_object), std::move(predicted_objects),
+        std::move(objects_per_lane), std::move(relevant_vos), std::move(ignored_vos), out_of_odd_obj_detected,
+        std::move(frenet_graph), std::move(*reference_lines), vehicle_odom_T, motion_history, lane_change_request,
+        desired_speed_limit, std::move(cache), std::move(lane_id_tracker), scene_msg.teleop_output,
+        scene_msg.in_teleop_zone, scene_msg.manual_lane_change_enabled.data, std::move(distances_to_route_end),
+        options.desired_speed_above_road_limit, terminal_planning_state, parking_spot_id, terminal_unpark_handoff_pose,
+        std::move(terminal_map));
+    ```
+- **Code Block 10**: Fix for `getEgoLane`
+    ```cpp
+    if (lane_graph.getEgoLane() != nullptr) {
+    const mappery::SuperLane& ego_lane = lane_graph.getEgoLane()->ego_lane;
+    auto verified_ego_lane_id = lane_id_tracker.verifyAndGetLaneID(ego_lane.lane_refs);
+    assert(verified_ego_lane_id);
+    lane_id_association = *verified_ego_lane_id;
+    }
+    ```
+- **Code Block 11**: Changes for `getNextMergeJunction`
+    ```cpp
+    boost::optional<lane_map::JunctionRef> next_merging_junction_in_route = boost::none;
+    if (lane_graph.getEgoLaneRef()) {
+        next_merging_junction_in_route = lane_map_utils::getNextMergeJunction(
+            *lane_graph.getEgoLaneRef(), lane_graph.getMap(),
+            lane_map_utils::forwardRouteLaneFollower(lane_graph.getMap(), lane_graph.getRouteLaneGroups()));
+    }
+    ```
+
+- **Description**:  Multiple updates were made to add new functionality for handling stop lines, static object boundaries, and terminal maps. Additionally, the buildPredictedScene method now supports new parameters for handling speed limits, terminal state machines, and stop lines. Several constants related to thresholds for stop line processing were also introduced.
