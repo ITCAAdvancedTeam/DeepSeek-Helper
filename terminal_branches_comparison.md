@@ -1,3 +1,160 @@
+## Review of Changes for Implementing New Terminal State Machine, Terminal Planner, and Trajectory Generator
+
+
+### 1. Lane Map Parsing and Features (Sections 1-5)
+
+- Sections:
+    - `lane_map::parsePolygonFeatures`
+    - `lane_map::parsePointFeatures`
+    - `lane_map::LaneGroup`
+    - `lane_map::TerminalParkingSpot`
+    - `lane_map::Pole`
+
+- Review Focus:
+    - Ensure new parsing functions (`parsePointFeatures`) do not conflict with existing lane parsing mechanisms.
+    - Validate the addition of the `is_left_shoulder_undrivable` flag in `LaneGroup` to avoid redundancy.
+    - Verify `TerminalParkingSpot` struct aligns with terminal planning needs.
+    - Check that the `Pole` struct does not introduce coordinate inconsistencies.
+
+- Decision:
+    Accept changes but require further validation for coordinate system consistency in `Pole` struct.
+
+---
+
+## 2. Terminal-Specific Structs and Messages (Sections 6-8)
+
+- Sections:
+    - `lane_map_utils::getBoostPolygonFromPoints`
+    - `lane_map::ParkingSpotBoundary`
+    - `lane_map::TerminalMap`
+
+- Review Focus:
+    - Ensure new struct definitions integrate smoothly with terminal state machine logic.
+    - Validate `TerminalMap` as a new mapping format.
+
+- Decision:
+    Accept changes but require further integration tests with the terminal state machine.
+
+---
+
+## 3. Lane Map Enhancements (Sections 9-16)
+
+- Sections:
+    - `lane_map::PointFeature`
+    - `LaneSubMap::insertFreeSpacePath`
+    - `maps::TiledZoneMap::getNearbyZoneTileId`
+    - `maps::MapZoneType`
+
+- Review Focus:
+    - Ensure `insertFreeSpacePath` properly interacts with terminal trajectory generation.
+    - Verify `MapZoneType` additions align with terminal-specific needs.
+
+- Decision:
+    Accept changes with minor refactoring to avoid redundant free-space handling.
+
+---
+
+## 4. Terminal Waypoints and Route Planning (Sections 17-23)
+
+- Sections:
+    - `ego_lane_finder::getNominalLanes`
+    - `lane_map_utils::getLaneRefsLeftToRight`
+    - `lane_map_utils::isDrivingOnLeftShoulderAllowed`
+    - `lane_map_utils::backwardJunction`
+
+- Review Focus:
+    - Ensure lane reference retrieval methods align with terminal trajectory generation.
+    - Verify `isDrivingOnLeftShoulderAllowed` does not conflict with terminal driving logic.
+
+- Decision:
+    Accept changes with additional verification for terminal-specific lane transitions.
+
+---
+
+## 5. Terminal State Machine (Sections 24-38)
+
+- Sections:
+    - `terminal_state_machine/abstract_terminal_state.h`
+    - `highway_driving.h`
+    - `terminal_lane_following.h`
+    - `terminal_sink.h`
+
+- Review Focus:
+    - Ensure smooth transitions between states, especially between highway and terminal operations.
+    - Validate terminal state logic with respect to waypoints and external signals.
+
+- Decision:
+    Accept changes but require further review for state transition conflicts.
+
+---
+
+## 6. Terminal Planner and Free Space Planning (Sections 39-50)
+
+- Sections:
+    - `terminal_planner.h`
+    - `TerminalPlanner.cfg`
+    - `FreeSpacePlanner.cfg`
+
+- Review Focus:
+    - Ensure free-space path planning aligns with terminal parking and unparking behaviors.
+    - Validate parameter tuning in `TerminalPlanner.cfg` and `FreeSpacePlanner.cfg`.
+
+- Decision:
+    Accept changes but require additional tuning for free-space planning parameters.
+
+---
+
+## 7. Behavior Planning and Constraints (Sections 51-56)
+
+- Sections:
+    - `planning::BehaviorType`
+    - `planning::PlannerParameters`
+    - `planning::PredictedScene`
+
+- Review Focus:
+    - Ensure new behavior types (`FREE_SPACE`) align with the existing planner framework.
+    - Validate constraint updates to avoid conflicts with general motion planning logic.
+
+- Decision:
+    Accept changes with further validation in terminal parking scenarios.
+
+---
+
+## 8. Terminal Mapping and Speed Limit Tracking (Sections 57-71)
+
+- Sections:
+    - `TerminalMappery`
+    - `SpeedLimitTracker`
+    - `planning::LaneCostBuilder`
+
+- Review Focus:
+    - Ensure `TerminalMappery` correctly maps terminal environments.
+    - Validate `SpeedLimitTracker` adjustments to terminal speed constraints.
+
+- Decision:
+    Accept changes but require performance benchmarks on terminal planning tasks.
+
+---
+
+## 9. Rasterization and Path Generation (Sections 72-75)
+
+- Sections:
+    - `rasterization_lib`
+    - `terminal_behavior_helpers.h`
+
+- Review Focus:
+    - Ensure rasterization efficiently supports terminal free-space planning.
+    - Validate coordinate transformations for free-space path execution.
+
+- Decision:
+    Accept changes but require further performance profiling.
+
+---
+
+## Comparison Items
+
+---
+
 ### 1. `lane_map::parsePolygonFeatures`
 
 - **Brief:** Changed existing function.
@@ -2329,3 +2486,156 @@
     ```
 
 - **Description**: `TerminalMappery` class is a direct representation of `perception_msgs::TerminalMap`. It is generated in `PredictedScene` and used for `planFreeSpacePath` and `rasterizeCostMap`. 
+
+---
+
+### 72. `free_space_planner.h`
+
+- **Brief:** Modify the default values for `FreeSpacePlannerParameters` to use uninitialized values (`NAN` and `-1`) instead of predefined numerical values.
+- **Location:**
+    - `/planning/terminal_planner_libs/include/free_space_planner/free_space_planner.h`
+
+- **Code**: Change default values for planner parameters
+    ```cpp
+    struct FreeSpacePlannerParameters
+    {
+    float turning_radius{ NAN };  // turning radius of the vehicle [meters]
+    float transition_cost{ NAN }; // cost of transitioning between different maneuvers
+    int iterations{ -1 };         // number of iterations for the piano mover planner
+    float search_radius{ NAN };   // search radius to use for improved goal search [meters]
+    float cell_size{ NAN };       // size of a cell in the costmap [meters]
+    int space_dim_size{ -1 };     // size of the space dimension in the costmap
+    int angle_dim_size{ -1 };     // size of the angle dimension in the costmap
+    float weight1{ NAN };         // weight for the distance cost in the goal search algorithm
+    float weight2{ NAN };         // weight for the heading cost in the goal search algorithm
+    };
+    ```
+- **Description**: The `FreeSpacePlannerParameters` structure is used in the `setParams` function called in both `TerminalParkingBehavior::TerminalParkingBehavior` class and `TerminalParkingBehavior::TerminalUnparkingBehavior` class. The `setParams` is called in `Terminal::setParams` function. And the content of `FreeSpacePlannerParameters` is used in `planFreeSpacePath` function.
+
+---
+
+### 73. `planning::rasterization_lib`
+
+- **Brief:** Introduces a rasterization library for free-space planning, implementing **Bresenham's line algorithm** to convert geometric paths into discrete grid representations. It provides functions for **checking intersections**, **clipping lines to boundaries**, and **rasterizing line segments** efficiently.
+- **Location:**
+    - `/planning/terminal_planner_libs/include/free_space_planner/rasterization.h`
+
+- **Function Descriptions**
+    - **Intersection & Boundary Checking**
+        - **`checkIntersectionWithinStartEnd(intersection, start, end)`**  
+        - Determines if an intersection point lies between two endpoints.
+
+        - **`getIntersectionsWithBoundary(line_segment, rows, columns)`**  
+        - Computes intersection points between a line segment and grid boundaries.
+
+        - **`checkPointInBoundsOrIntersection(start, end, rows, columns)`**  
+        - Checks if a line segment is entirely within the grid boundary or clips it to the boundary if it extends beyond.
+
+    - **Rasterization Utilities**
+        - **`rasterizeLineSegmentLow(x0, y0, x1, y1, rows, columns, buffer, fill_value)`**  
+        - Implements **Bresenham's algorithm** for shallow line slopes (|dy/dx| ≤ 1).
+
+        - **`rasterizeLineSegmentHigh(x0, y0, x1, y1, rows, columns, buffer, fill_value)`**  
+        - Implements **Bresenham's algorithm** for steep line slopes (|dy/dx| > 1).
+
+        - **`rasterizeLineSegment(start, end, rows, columns, buffer, fill_value)`**  
+        - Determines whether the line segment is inside or clipped to the grid and applies **Bresenham’s algorithm** accordingly.
+
+        - **`rasterizeLineSegments(line_segments, rows, columns, buffer, fill_value)`**  
+        - Rasterizes multiple connected line segments to discretize a **continuous path**.
+
+---
+
+### 74. `terminal_behavior_helpers.h`
+
+- **Brief:** Introduces helper functions and parameters for terminal behavior planning, including cost map rasterization, path planning in free space, and coordinate transformations.
+- **Location:**
+    - `/planning/terminal_planner_libs/include/terminal_behavior_helpers.h`
+
+- **Function Descriptions**
+    - **Parameter Structure**
+        - **`TerminalPlannerParams`**
+        - Stores parameters for **cost mapping** and **free space path planning**, including:
+            - Minimum and maximum cost values for **distance transformation**.
+            - Scaling factors for **cost adjustments**.
+            - Longitudinal margins and **path extension distances**.
+
+    - **Path Planning**
+        - **`buildSplineReferenceLine(path, ego_theta)`**
+        - Generates a **spline-based reference line** from a series of `Pose2D` points.
+
+        - **`planFreeSpacePath(free_space_planner_params, ego_footprint, terminal_planner_params, free_space_planner, terminal_map, start, goal)`**
+        - Plans a **collision-free path** in **free space** from a given start to a goal position.
+        - Uses **terminal mapping data** to avoid static obstacles and parking areas.
+
+    - **Cost Map Rasterization**
+        - **`rasterizeCostMap(free_space_planner_params, terminal_planner_params, terminal_map, offset_x, offset_y)`**
+        - Converts the scene into a **grid-based cost map**, which is used for **pathfinding**.
+
+    - **Coordinate Transformations**
+        - **`convertGcsLocationToUtm(gcs_location)`**
+        - Converts a **Geographic Coordinate System (GCS) location** to **UTM coordinates**.
+
+        - **`transformPoseCoordinateFrame(pose, dx, dy, d_theta)`**
+        - Applies a **transformation** to a pose by translating and rotating it in a new **coordinate frame**.
+
+- **Description**: The `TerminalPlannerParams` structure is used in the `setParams` function called in both `TerminalParkingBehavior::TerminalParkingBehavior` class and `TerminalParkingBehavior::TerminalUnparkingBehavior` class. The `setParams` is called in `Terminal::setParams` function. And the content of `TerminalPlannerParams` is used in `planFreeSpacePath` function.
+
+---
+
+### 75. `planning::tgv2::BehaviorType` and `planning::tgv2::BEHAVIOR_TYPE_STRINGS`
+
+- **Brief:** Refactors `BehaviorType` enumeration by **removing redundant behaviors** and **adding new action categories** to improve clarity and organization. Modify `BEHAVIOR_TYPE_STRINGS` unordered_map accordingly.
+- **Location:**
+    - `/planning/trajectory_generation_v2/include/trajectory_generation_v2/core/action_target_type.h`
+
+- **Changes in `BehaviorType` Enumeration**
+    - **Removed:**
+    - `GAP_FIND`
+    - `OVERTAKE`
+    - `YIELD_TO_LANE_CHANGE`
+    - `TERMINAL_FOLLOW_LANE`
+    - `TERMINAL_PARK`
+    - `TERMINAL_UNPARK`
+
+    - **Added:**
+    - `FREE_SPACE` – Represents free-space trajectory generation.
+
+    - **Modified:**
+    - `TELEOP` remains in the enumeration but is repositioned.
+
+- **Updates to `BEHAVIOR_TYPE_STRINGS`**
+    - **Removed behavior mappings** corresponding to deleted behaviors.
+    - **Added a new mapping for `FREE_SPACE`** to ensure consistent debug printing.
+    - **Updated structure to maintain alignment with the modified `BehaviorType` enum.**
+
+---
+
+### 76. `trajectory_generator.cpp`
+
+- **Brief:** Refactors trajectory generation logic by **removing terminal-specific behaviors** and **introducing `FREE_SPACE` trajectory generation**.
+- **Location:**
+    - `/planning/trajectory_generation_v2/src/modules/lane_keeping/trajectory_generator.cpp`
+
+---
+
+- **Changes in Trajectory Generation Logic**
+    - **Removed:**
+    - `TERMINAL_FOLLOW_LANE`
+    - `TERMINAL_PARK`
+    - `TERMINAL_UNPARK`
+
+    - **Added:**
+    - `FREE_SPACE` – Enables trajectory generation in **unstructured environments**.
+
+- **Updates in `trajectoryGenerationTask()`**
+    - **Removes special handling for terminal behaviors**, simplifying the switch-case logic.
+    - **Adds handling for `FREE_SPACE`**, integrating it into trajectory generation.
+
+- **Updates in `bestTrajectory()`**
+    - **Removes solution retrieval for terminal behaviors**.
+    - **Adds `FREE_SPACE` solution retrieval**, ensuring it is properly selected.
+
+---
+
+- **Description**: The trajectory generation is modified based on the method selection for terminal driving. If we are using different trajectory solution, here is the place to select trajectory generator.
