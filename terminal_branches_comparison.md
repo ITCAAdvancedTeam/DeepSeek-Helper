@@ -2103,3 +2103,229 @@
     ```
 
 - **Description**:  Multiple updates were made to add new functionality for handling stop lines, static object boundaries, and terminal maps. Additionally, the buildPredictedScene method now supports new parameters for handling speed limits, terminal state machines, and stop lines. Several constants related to thresholds for stop line processing were also introduced.
+
+---
+
+### 65. `planning::fillCostsOuterToInner` and `planning::fillCostsInnerToOuter`
+
+- **Brief:** Refactor functions for lane preference cost calculations by renaming and altering the directionality of lane cost computations.
+- **Location:**
+    - `/planning/situation_awareness/include/situation_awareness/static_costs/lane_cost_builders/lane_preference_cost_builder_helpers/lane_preferences_cost_builder_helpers.h`
+
+- **Description**: change name from `fillCostsRightToLeft` to `fillCostsOuterToInner`, `fillCostsLeftToRight` to `fillCostsInnerToOuter`.
+
+---
+
+### 66. `planning::findMergingLaneRefs`
+
+- **Brief:** Rename function to generalize its purpose for finding merging lane references.
+- **Location:**
+    - `/planning/situation_awareness/include/situation_awareness/static_costs/lane_cost_builders/merging/merging_utils.h`
+
+- **Description**: change name from `rightMergingLaneRefs` to `findMergingLaneRefs`.
+
+---
+
+### 67. `planning::outerMostLaneCost`
+
+- **Brief:** Rename function to generalize its purpose for the outermost lane cost, not just the rightmost lane.
+- **Location:**
+    - `/planning/situation_awareness/include/situation_awareness/static_costs/lane_cost_builders/vehicle_on_shoulder_cost_builder.h`
+
+- **Description**: change name from `rightMostLaneCost` to `outerMostLaneCost`.
+
+---
+
+### 68. `planning::SituationSpeedLimiter::updateCurrentSpeedLimit`
+
+- **Brief:** Add a check for valid `EgoLaneRef` before retrieving speed limits from the limiters.
+- **Location:**
+    - `/planning/situation_awareness/src/speed_limiter/situation_speed_limiter.cpp`
+
+- **Code**: Adding validation for `EgoLaneRef`
+    ```cpp
+    if (!scene.getLaneGraph().getEgoLaneRef()) {
+    suggested_speed_from_limiters[type] = {};
+    } else {
+    suggested_speed_from_limiters[type] = limiter->getLimits(scene);
+    }
+    ```
+---
+
+### 69. `planning::LaneCostBuilder::LaneCostBuilder`
+
+- **Brief:** Add conditional activation for `EndOfRouteCostBuilder` and introduce a check for `EgoLaneRef` before adding cost policies.
+- **Location:**
+    - `/planning/situation_awareness/src/static_costs/lane_cost_builder.cpp`
+
+- **Code**: Validate EgoLaneRef before adding policies
+    ```cpp
+    if (!scene.getLaneGraph().getEgoLaneRef()) {
+        combined_policy.addPolicy(cost_type, LaneCostPolicy());
+    } else {
+        const LaneCostPolicy& policy = builder->buildCostFunction(scene);
+        combined_policy.addPolicy(cost_type, policy);
+    }
+    ```
+- **Description**: A check is added to ensure that `EgoLaneRef` is valid before computing lane cost policies. If `EgoLaneRef` is null, an empty `LaneCostPolicy` is added to combined_policy, preventing invalid accesses and ensuring stability.
+
+---
+
+### 70. `SpeedLimitTracker` Class
+
+- **Brief:** Introduce a new `SpeedLimitTracker` class to track and determine the desired speed limit based on scene data, ego state, and terminal conditions.
+- **Location:**
+    - `/planning/speed_limit_tracker/include/speed_limit_tracker/speed_limit_tracker.h`
+
+- **Code**: `SpeedLimitTracker` Class Definition
+
+    ```cpp
+    class SpeedLimitTracker
+    {
+    public:
+    SpeedLimitTracker() : last_dynamic_speed_limit_(100.0)
+    {
+    }
+
+    const PredictedScene::DesiredSpeedLimit
+    getDesiredSpeedLimit(const perception_msgs::Scene& scene_msg, const Mappery& map,
+                        const std::unordered_map<ObjectID, PredictedObject>& predicted_objects, const EgoObject& ego,
+                        const terminal_sm::TerminalStateMachine& terminal_state_machine,
+                        const double desired_speed_above_road_limit, const double terminal_parking_speed_limit);
+
+    private:
+    double last_dynamic_speed_limit_;
+
+    std::optional<double> updateSpeedLimitSign(const std::unordered_map<ObjectID, PredictedObject>& predicted_objects,
+                                                const EgoObject& ego, const Mappery& map);
+    };
+    ```
+- **Description:**
+  - **Introduces the `SpeedLimitTracker` class**, responsible for tracking and determining the desired speed limit based on various factors.
+  - **Maintains the last dynamic speed limit** using `last_dynamic_speed_limit_`, initialized to `100.0`.
+  - **Provides the function `getDesiredSpeedLimit()`**, which calculates the speed limit considering:
+    - **Scene data (`scene_msg`)** - includes perception information.
+    - **Road mapping (`map`)** - retrieves lane and road information.
+    - **Predicted objects (`predicted_objects`)** - factors in detected obstacles and vehicles.
+    - **Ego vehicle state (`ego`)** - considers current vehicle dynamics.
+    - **Terminal state machine (`terminal_state_machine`)** - applies rules for speed adjustment in terminal areas.
+    - **Speed constraints** - incorporates limits from `desired_speed_above_road_limit` and `terminal_parking_speed_limit`.
+  - **Defines a private helper function `updateSpeedLimitSign()`**, which processes detected speed limit signs and updates the speed limit accordingly.
+
+--- 
+
+### 71. `TerminalMappery` Class
+
+- **Brief:** Introduce the `TerminalMappery` class to construct a terminal environment representation in the ego vehicle's frame using data from `perception_msgs::TerminalMap`. The class provides methods for retrieving static obstacles and parking spot boundaries within a given distance.
+- **Location:**
+    - `/planning/terminal_map_server/include/terminal_map_server/terminal_mappery/terminal_mappery.h`
+
+- **Code**
+    ```cpp
+    class TerminalMappery
+    {
+    public:
+    /**
+    * @brief Construct a new TerminalMappery object
+    *
+    * @param terminal_map The terminal map
+    */
+    TerminalMappery(const perception_msgs::TerminalMap& terminal_map);
+
+    /**
+    * @brief Construct a new (empty) TerminalMappery object
+    */
+    TerminalMappery();
+
+    /**
+    * @brief Load static objects in terminal
+    *
+    * @param predicted_objects The predicted objects (ObjectID, centerpoint, hull info)
+    */
+    void loadStaticObjectsInTerminal(
+        const std::unordered_map<ObjectID, std::pair<Eigen::Vector2d, perception_msgs::HullInfo>>& predicted_objects);
+
+    /**
+    * @brief Get all static boundaries of Objects in terminal within a certain distance
+    *
+    * @param distance_m The distance in meters
+    */
+    std::vector<std::vector<Eigen::Vector2d>> getStaticObstaclesBoundariesWithinDistance(double distance_m) const;
+
+    /**
+    * @brief Get the terminal parking boundaries for a given terminal in Vehicle Frame within a certain distance
+    *
+    * @param distance_m The distance in meters
+    * @return std::vector<std::vector<Eigen::Vector2d>> The terminal parking boundaries in Vehicle Frame (no heading)
+    */
+    std::vector<std::vector<Eigen::Vector2d>> getTerminalParkingBoundariesWithinDistance(double distance_m) const;
+
+    /**
+    * @brief Get terminal parking spot for the given parking spot ID
+    *
+    * @param parking_spot_id The parking spot ID
+    * @return std::optional<lane_map::TerminalParkingSpot> The terminal parking spot, if it exists
+    */
+    std::optional<lane_map::TerminalParkingSpot> getTerminalParkingSpot(const std::string& parking_spot_id) const;
+
+    /**
+    * @brief Get the terminal map
+    *
+    * @return const perception_msgs::TerminalMap& The terminal map
+    */
+    const lane_map::TerminalMap& getTerminalMap() const;
+
+    private:
+    struct StaticObstacleBoundary
+    {
+        Eigen::Vector2d centerpoint;
+        std::vector<Eigen::Vector2d> boundary;
+    };
+
+    // Terminal Map
+    lane_map::TerminalMap terminal_map_;
+
+    // Map Frame
+    maps::MapFrame map_frame_;
+
+    // Static Object Boundaries / Parking Spots in Terminal
+    std::vector<std::vector<Eigen::Vector2d>> static_obstacles_boundaries_;
+    std::vector<lane_map::TerminalParkingSpot> terminal_parking_spots_;
+
+    // KDTree for static obstacles and parking spots
+    std::unique_ptr<utils_association::PointToPointPairer> static_obstacles_kdtree_;
+    std::unique_ptr<utils_association::PointToPointPairer> parking_spots_kdtree_;
+
+    /**
+    * @brief Load parking spots in terminal
+    */
+    void loadParkingSpotsInTerminal();
+
+    /**
+    * @brief Convert a polygon from UTM to Vehicle Frame
+    *
+    * @param polygon The polygon in UTM
+    * @return std::vector<Eigen::Vector2d> The polygon in Vehicle Frame (no heading)
+    */
+    std::vector<Eigen::Vector2d> convertPolygonUtmToVehicleFrame(const std::vector<Eigen::Vector2d>& polygon) const;
+
+    /**
+    * @brief Convert a point from UTM to Vehicle Frame
+    *
+    * @param utm_point The point in UTM
+    * @return Eigen::Vector2d The point in Vehicle Frame (no heading)
+    */
+    Eigen::Vector2d convertPointUtmToVehicleFrame(const Eigen::Vector2d& utm_point) const;
+
+    /**
+    * @brief Convert a point from Vehicle Frame to UTM
+    *
+    * @param vehicle_point The point in Vehicle Frame
+    * @return Eigen::Vector2d The point in UTM
+    */
+    Eigen::Vector2d convertPointVehicleFrameToUtm(const Eigen::Vector2d& vehicle_point) const;
+    };
+
+    ```
+
+- **Description**: `TerminalMappery` class is a direct representation of `perception_msgs::TerminalMap`. It is generated in `PredictedScene` and used for `planFreeSpacePath` and `rasterizeCostMap`. 
